@@ -12,9 +12,9 @@
         </div>
 
         <div class="text-center">
-            <h1 class="text-2xl font-bold text-slate-900 mb-3">Оплата прошла успешно</h1>
+            <h1 class="text-2xl font-bold text-slate-900 mb-3">Заказ успешно оформлен</h1>
             <p class="text-slate-600">
-                Заказ #{{ $order->id }} успешно оформлен. Мы сохранили его в вашем личном кабинете.
+                Заказ #{{ $order->id }} принят. Он сохранён в вашем личном кабинете. Статус оплаты обновится после подтверждения заказа менеджером.
             </p>
         </div>
 
@@ -24,12 +24,8 @@
                 <span class="font-medium text-slate-900">{{ $order->status->name ?? 'Новый' }}</span>
             </div>
             <div class="mt-2 flex justify-between gap-4">
-                <span class="text-slate-500">Сумма к оплате</span>
+                <span class="text-slate-500">Сумма</span>
                 <span class="font-medium text-slate-900">{{ number_format((float) $order->total, 2) }} €</span>
-            </div>
-            <div class="mt-2 flex justify-between gap-4">
-                <span class="text-slate-500">Способ оплаты</span>
-                <span class="font-medium text-slate-900">{{ $order->paymentMethod->name ?? 'Онлайн-оплата' }}</span>
             </div>
             <div class="mt-2 flex justify-between gap-4">
                 <span class="text-slate-500">Статус оплаты</span>

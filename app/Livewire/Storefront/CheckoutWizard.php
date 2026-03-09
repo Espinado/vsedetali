@@ -113,8 +113,9 @@ class CheckoutWizard extends Component
         ];
 
         $step2 = [
-            'shipping_method_id' => ['required', 'integer', 'exists:shipping_methods,id'],
-            'payment_method_id' => ['required', 'integer', 'exists:payment_methods,id'],
+            // Способ доставки и оплаты — планируются в будущем
+            // 'shipping_method_id' => ['required', 'integer', 'exists:shipping_methods,id'],
+            // 'payment_method_id' => ['required', 'integer', 'exists:payment_methods,id'],
         ];
 
         if ($this->address_id) {
@@ -211,8 +212,8 @@ class CheckoutWizard extends Component
                 $cart,
                 $customerData,
                 $deliveryData,
-                $this->shipping_method_id,
-                $this->payment_method_id,
+                null, // способ доставки — в будущем
+                null, // способ оплаты — в будущем
                 $this->comment ?: ''
             );
             $this->dispatch('cart-updated');

@@ -20,6 +20,17 @@ class EditOrder extends EditRecord
         if ($status) {
             $this->record->update(['status_id' => $status->id]);
             $this->record->refresh();
+            if ($slug === 'confirmed') {
+                $this->markOrderPaymentAsPaid();
+            }
+        }
+    }
+
+    protected function markOrderPaymentAsPaid(): void
+    {
+        $payment = $this->record->latestPayment;
+        if ($payment && $payment->status !== 'paid') {
+            $payment->update(['status' => 'paid', 'paid_at' => now()]);
         }
     }
 
@@ -38,6 +49,14 @@ class EditOrder extends EditRecord
         }
 
         $this->record->refresh();
+    }
+
+    protected function afterSave(): void
+    {
+        $confirmedStatus = OrderStatus::where('slug', 'confirmed')->first();
+        if ($confirmedStatus && $this->record->status_id === $confirmedStatus->id) {
+            $this->markOrderPaymentAsPaid();
+        }
     }
 
     protected function getHeaderActions(): array

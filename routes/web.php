@@ -6,7 +6,6 @@ use App\Livewire\Storefront\ProductGrid;
 use App\Models\Banner;
 use App\Models\Order;
 use App\Models\Page;
-use App\Models\Payment;
 use App\Models\Product;
 use Illuminate\Support\Facades\Route;
 
@@ -32,20 +31,8 @@ Route::get('/checkout', \App\Livewire\Storefront\CheckoutWizard::class)->name('c
 Route::get('/checkout/payment/{order}', function (Order $order) {
     abort_if($order->user_id !== auth()->id() && ! auth()->user()?->is_admin, 403);
 
-    Payment::updateOrCreate(
-        [
-            'order_id' => $order->id,
-        ],
-        [
-            'amount' => $order->total,
-            'status' => 'paid',
-            'payment_method_id' => $order->payment_method_id,
-            'paid_at' => now(),
-            'gateway_reference' => 'fake-payment-' . $order->id,
-        ]
-    );
-
-    return view('storefront.checkout-payment', ['order' => $order->load('paymentMethod')]);
+    // Статус оплаты меняется на «оплачено» только когда администратор переведёт заказ во второй статус (подтверждён)
+    return view('storefront.checkout-payment', ['order' => $order->load('paymentMethod', 'latestPayment')]);
 })->name('checkout.payment')->middleware('auth');
 Route::get('/checkout/success/{order}', function (Order $order) {
     abort_if($order->user_id !== auth()->id() && ! auth()->user()?->is_admin, 403);

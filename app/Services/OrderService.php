@@ -6,6 +6,7 @@ use App\Models\Cart;
 use App\Models\Order;
 use App\Models\OrderAddress;
 use App\Models\OrderItem;
+use App\Models\Payment;
 use App\Mail\OrderConfirmedMail;
 use App\Models\OrderStatus;
 use App\Models\ShippingMethod;
@@ -18,8 +19,8 @@ class OrderService
         Cart $cart,
         array $customerData,
         array $deliveryData,
-        int $shippingMethodId,
-        int $paymentMethodId,
+        ?int $shippingMethodId = null,
+        ?int $paymentMethodId = null,
         string $comment = ''
     ): Order {
         $cart->load(['cartItems.product']);
@@ -29,14 +30,18 @@ class OrderService
         }
 
         $status = OrderStatus::where('slug', 'new')->firstOrFail();
-        $shippingMethod = ShippingMethod::findOrFail($shippingMethodId);
 
         $subtotal = 0;
         foreach ($cart->cartItems as $item) {
             $subtotal += $item->price * $item->quantity;
         }
-
-        $shippingCost = $this->calculateShippingCost($subtotal, $shippingMethod);
+        $shippingCost = 0;
+        if ($shippingMethodId) {
+            $shippingMethod = ShippingMethod::find($shippingMethodId);
+            if ($shippingMethod) {
+                $shippingCost = $this->calculateShippingCost($subtotal, $shippingMethod);
+            }
+        }
         $total = $subtotal + $shippingCost;
 
         return DB::transaction(function () use (
@@ -44,7 +49,6 @@ class OrderService
             $customerData,
             $deliveryData,
             $status,
-            $shippingMethod,
             $shippingMethodId,
             $paymentMethodId,
             $subtotal,
@@ -65,6 +69,15 @@ class OrderService
                 'shipping_method_id' => $shippingMethodId,
                 'payment_method_id' => $paymentMethodId,
                 'comment' => $comment ?: null,
+            ]);
+
+            Payment::create([
+                'order_id' => $order->id,
+                'amount' => $total,
+                'status' => 'pending',
+                'payment_method_id' => $paymentMethodId,
+                'paid_at' => null,
+                'gateway_reference' => null,
             ]);
 
             OrderAddress::create([

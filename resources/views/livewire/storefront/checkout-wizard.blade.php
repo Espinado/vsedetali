@@ -107,37 +107,16 @@
                         <p class="text-slate-600 text-sm">Доставка по выбранному адресу.</p>
                     @endif
                 </div>
+                {{-- Способ доставки и оплаты — планируются в будущем
                 <div class="bg-white rounded-lg border border-slate-200 p-6">
                     <h2 class="text-lg font-semibold mb-4">Способ доставки *</h2>
-                    <div class="space-y-2">
-                        @foreach ($this->shippingMethods as $method)
-                            <label class="flex items-center gap-3 p-3 border rounded cursor-pointer hover:bg-slate-50">
-                                <input type="radio" wire:model="shipping_method_id" value="{{ $method->id }}" class="rounded-full">
-                                <span class="flex-1">{{ $method->name }}</span>
-                                <span class="font-medium">
-                                    @if ($method->free_from && $this->subtotal >= (float) $method->free_from)
-                                        Бесплатно
-                                    @else
-                                        {{ number_format((float) $method->cost, 2) }} €
-                                    @endif
-                                </span>
-                            </label>
-                        @endforeach
-                    </div>
-                    @error('shipping_method_id') <span class="text-red-600 text-sm">{{ $message }}</span> @enderror
+                    ...
                 </div>
                 <div class="bg-white rounded-lg border border-slate-200 p-6">
                     <h2 class="text-lg font-semibold mb-4">Способ оплаты *</h2>
-                    <div class="space-y-2">
-                        @foreach ($this->paymentMethods as $method)
-                            <label class="flex items-center gap-3 p-3 border rounded cursor-pointer hover:bg-slate-50">
-                                <input type="radio" wire:model="payment_method_id" value="{{ $method->id }}" class="rounded-full">
-                                <span>{{ $method->name }}</span>
-                            </label>
-                        @endforeach
-                    </div>
-                    @error('payment_method_id') <span class="text-red-600 text-sm">{{ $message }}</span> @enderror
+                    ...
                 </div>
+                --}}
                 <div class="flex gap-3">
                     <button type="button" wire:click="stepBack" class="px-4 py-2 border border-slate-300 rounded hover:bg-slate-50">← Назад</button>
                     <button type="submit" class="px-4 py-2 bg-indigo-600 text-white rounded hover:bg-indigo-700">Далее →</button>

@@ -20,6 +20,17 @@ class ViewOrder extends ViewRecord
         if ($status) {
             $this->record->update(['status_id' => $status->id]);
             $this->record->refresh();
+            if ($slug === 'confirmed') {
+                $this->markOrderPaymentAsPaid();
+            }
+        }
+    }
+
+    protected function markOrderPaymentAsPaid(): void
+    {
+        $payment = $this->record->latestPayment;
+        if ($payment && $payment->status !== 'paid') {
+            $payment->update(['status' => 'paid', 'paid_at' => now()]);
         }
     }
 
@@ -48,7 +59,6 @@ class ViewOrder extends ViewRecord
                 ->color('info')
                 ->action(function (): void {
                     $this->setOrderStatus('confirmed');
-
                     Notification::make()->title('Заказ подтверждён')->success()->send();
                 }),
             Actions\Action::make('pack')
