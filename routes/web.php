@@ -30,7 +30,7 @@ Route::get('/product/{product:slug}', [ProductController::class, 'show'])->name(
 Route::get('/cart', \App\Livewire\Storefront\CartPage::class)->name('cart');
 Route::get('/checkout', \App\Livewire\Storefront\CheckoutWizard::class)->name('checkout')->middleware('auth');
 Route::get('/checkout/payment/{order}', function (Order $order) {
-    abort_if($order->user_id !== auth()->id(), 403);
+    abort_if($order->user_id !== auth()->id() && ! auth()->user()?->is_admin, 403);
 
     Payment::updateOrCreate(
         [
@@ -48,7 +48,7 @@ Route::get('/checkout/payment/{order}', function (Order $order) {
     return view('storefront.checkout-payment', ['order' => $order->load('paymentMethod')]);
 })->name('checkout.payment')->middleware('auth');
 Route::get('/checkout/success/{order}', function (Order $order) {
-    abort_if($order->user_id !== auth()->id(), 403);
+    abort_if($order->user_id !== auth()->id() && ! auth()->user()?->is_admin, 403);
 
     return view('storefront.checkout-success', [
         'order' => $order->load(['status', 'paymentMethod', 'latestPayment']),
