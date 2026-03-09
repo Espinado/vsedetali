@@ -1,0 +1,15 @@
+{
+	"folders": [
+		{
+			"name": "vsedetali",
+			"path": "."
+		}
+	],
+	"settings": {
+		"files.exclude": {
+			"**/.git": true,
+			"**/node_modules": true,
+			"**/vendor": true
+		}
+	}
+}
