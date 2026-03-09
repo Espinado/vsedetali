@@ -71,7 +71,7 @@ Route::middleware(['auth'])->prefix('account')->name('account.')->group(function
         return view('account.orders', ['orders' => $orders]);
     })->name('orders.index');
     Route::get('/orders/{order}', function (App\Models\Order $order) {
-        abort_if($order->user_id !== auth()->id(), 403);
+        abort_if($order->user_id !== auth()->id() && ! auth()->user()?->is_admin, 403);
         return view('account.order-show', ['order' => $order->load(['orderItems', 'orderAddresses', 'status', 'shippingMethod', 'paymentMethod', 'latestPayment', 'latestShipment.shippingMethod'])]);
     })->name('orders.show');
     Route::get('/profile', [\App\Http\Controllers\Account\ProfileController::class, 'edit'])->name('profile.edit');
