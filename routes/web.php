@@ -4,7 +4,9 @@ use App\Http\Controllers\AuthController;
 use App\Http\Controllers\ProductController;
 use App\Livewire\Storefront\ProductGrid;
 use App\Models\Banner;
+use App\Models\Order;
 use App\Models\Page;
+use App\Models\Payment;
 use App\Models\Product;
 use Illuminate\Support\Facades\Route;
 
@@ -27,6 +29,31 @@ Route::get('/catalog/{categorySlug?}', ProductGrid::class)->name('catalog');
 Route::get('/product/{product:slug}', [ProductController::class, 'show'])->name('product.show');
 Route::get('/cart', \App\Livewire\Storefront\CartPage::class)->name('cart');
 Route::get('/checkout', \App\Livewire\Storefront\CheckoutWizard::class)->name('checkout')->middleware('auth');
+Route::get('/checkout/payment/{order}', function (Order $order) {
+    abort_if($order->user_id !== auth()->id(), 403);
+
+    Payment::updateOrCreate(
+        [
+            'order_id' => $order->id,
+        ],
+        [
+            'amount' => $order->total,
+            'status' => 'paid',
+            'payment_method_id' => $order->payment_method_id,
+            'paid_at' => now(),
+            'gateway_reference' => 'fake-payment-' . $order->id,
+        ]
+    );
+
+    return view('storefront.checkout-payment', ['order' => $order->load('paymentMethod')]);
+})->name('checkout.payment')->middleware('auth');
+Route::get('/checkout/success/{order}', function (Order $order) {
+    abort_if($order->user_id !== auth()->id(), 403);
+
+    return view('storefront.checkout-success', [
+        'order' => $order->load(['status', 'paymentMethod', 'latestPayment']),
+    ]);
+})->name('checkout.success')->middleware('auth');
 Route::get('/page/{slug}', function (string $slug) {
     $page = Page::where('slug', $slug)->active()->firstOrFail();
     return view('storefront.page', ['page' => $page]);
@@ -36,16 +63,16 @@ Route::get('/page/{slug}', function (string $slug) {
 Route::middleware(['auth'])->prefix('account')->name('account.')->group(function () {
     Route::get('/', function () {
         $user = auth()->user();
-        $recentOrders = $user->orders()->with('status')->latest()->take(5)->get();
+        $recentOrders = $user->orders()->with(['status', 'latestPayment'])->latest()->take(5)->get();
         return view('account.dashboard', ['recentOrders' => $recentOrders]);
     })->name('dashboard');
     Route::get('/orders', function () {
-        $orders = auth()->user()->orders()->with(['status'])->latest()->paginate(10);
+        $orders = auth()->user()->orders()->with(['status', 'latestPayment', 'latestShipment'])->latest()->paginate(10);
         return view('account.orders', ['orders' => $orders]);
     })->name('orders.index');
     Route::get('/orders/{order}', function (App\Models\Order $order) {
         abort_if($order->user_id !== auth()->id(), 403);
-        return view('account.order-show', ['order' => $order->load(['orderItems', 'orderAddresses', 'status', 'shippingMethod', 'paymentMethod'])]);
+        return view('account.order-show', ['order' => $order->load(['orderItems', 'orderAddresses', 'status', 'shippingMethod', 'paymentMethod', 'latestPayment', 'latestShipment.shippingMethod'])]);
     })->name('orders.show');
     Route::get('/profile', [\App\Http\Controllers\Account\ProfileController::class, 'edit'])->name('profile.edit');
     Route::put('/profile', [\App\Http\Controllers\Account\ProfileController::class, 'update'])->name('profile.update');

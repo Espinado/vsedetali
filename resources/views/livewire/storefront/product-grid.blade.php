@@ -29,8 +29,68 @@
                 @endforeach
             </ul>
 
+            <div class="mt-6">
+                <h3 class="font-semibold text-slate-800 mb-3">Подбор по авто</h3>
+                <div class="space-y-3">
+                    <div>
+                        <label for="vehicle-make" class="block text-sm text-slate-600 mb-1">Марка</label>
+                        <select id="vehicle-make" wire:model.live="vehicleMake" class="w-full rounded-lg border-slate-300 shadow-sm text-sm">
+                            <option value="">Все марки</option>
+                            @foreach($this->vehicleMakes as $make)
+                                <option value="{{ $make }}">{{ $make }}</option>
+                            @endforeach
+                        </select>
+                    </div>
+
+                    <div>
+                        <label for="vehicle-model" class="block text-sm text-slate-600 mb-1">Модель</label>
+                        <select id="vehicle-model" wire:model.live="vehicleModel" class="w-full rounded-lg border-slate-300 shadow-sm text-sm" @disabled($vehicleMake === '')>
+                            <option value="">Все модели</option>
+                            @foreach($this->vehicleModels as $model)
+                                <option value="{{ $model }}">{{ $model }}</option>
+                            @endforeach
+                        </select>
+                    </div>
+
+                    <div>
+                        <label for="vehicle-year" class="block text-sm text-slate-600 mb-1">Год</label>
+                        <select id="vehicle-year" wire:model.live="vehicleYear" class="w-full rounded-lg border-slate-300 shadow-sm text-sm" @disabled($vehicleModel === '')>
+                            <option value="0">Любой год</option>
+                            @foreach($this->vehicleYears as $year)
+                                <option value="{{ $year }}">{{ $year }}</option>
+                            @endforeach
+                        </select>
+                    </div>
+                </div>
+            </div>
+
+            <div class="mt-6">
+                <h3 class="font-semibold text-slate-800 mb-3">Цена</h3>
+                <div class="grid grid-cols-2 gap-2">
+                    <input type="number"
+                           min="0"
+                           step="0.01"
+                           wire:model.live.debounce.400ms="priceFrom"
+                           placeholder="От"
+                           class="w-full rounded-lg border-slate-300 shadow-sm text-sm">
+                    <input type="number"
+                           min="0"
+                           step="0.01"
+                           wire:model.live.debounce.400ms="priceTo"
+                           placeholder="До"
+                           class="w-full rounded-lg border-slate-300 shadow-sm text-sm">
+                </div>
+            </div>
+
+            <div class="mt-6">
+                <label class="flex items-center gap-2 cursor-pointer">
+                    <input type="checkbox" wire:model.live="inStockOnly" class="rounded border-slate-300">
+                    <span class="text-sm text-slate-700">Только в наличии</span>
+                </label>
+            </div>
+
+            <h3 class="font-semibold text-slate-800 mt-6 mb-3">Бренд</h3>
             @if($this->brandsInCategory->isNotEmpty())
-                <h3 class="font-semibold text-slate-800 mt-6 mb-3">Бренд</h3>
                 <ul class="space-y-1">
                     <li>
                         <label class="flex items-center gap-2 py-1 cursor-pointer">
@@ -51,9 +111,11 @@
                         </li>
                     @endforeach
                 </ul>
+            @else
+                <p class="text-sm text-slate-500">Для текущего набора фильтров доступных брендов нет.</p>
             @endif
 
-            @if($brandId > 0 || $search !== '' || $sort !== 'name_asc')
+            @if($brandId > 0 || $search !== '' || $sort !== 'name_asc' || $vehicleMake !== '' || $vehicleModel !== '' || $vehicleYear > 0 || $priceFrom !== '' || $priceTo !== '' || $inStockOnly)
                 <button type="button" wire:click="clearFilters"
                         class="mt-4 text-sm text-slate-500 hover:text-slate-700 underline">
                     Сбросить фильтры
@@ -68,7 +130,7 @@
             <div class="w-full sm:w-72">
                 <input type="search"
                        wire:model.live.debounce.300ms="search"
-                       placeholder="Поиск по названию или артикулу"
+                       placeholder="Поиск по названию, SKU, OEM или аналогу"
                        class="w-full rounded-lg border-slate-300 shadow-sm focus:border-slate-500 focus:ring-slate-500 text-sm">
             </div>
             <div class="flex items-center gap-2">
@@ -86,8 +148,38 @@
             </div>
         </div>
 
+        @if($brandId > 0 || $vehicleMake !== '' || $vehicleModel !== '' || $vehicleYear > 0 || $priceFrom !== '' || $priceTo !== '' || $inStockOnly)
+            <div class="mb-4 flex flex-wrap gap-2 text-sm">
+                @if($brandId > 0)
+                    @php $selectedBrand = $this->brandsInCategory->firstWhere('id', $brandId); @endphp
+                    @if($selectedBrand)
+                        <span class="inline-flex items-center rounded-full bg-slate-100 px-3 py-1 text-slate-700">{{ $selectedBrand->name }}</span>
+                    @endif
+                @endif
+                @if($vehicleMake !== '')
+                    <span class="inline-flex items-center rounded-full bg-slate-100 px-3 py-1 text-slate-700">{{ $vehicleMake }}</span>
+                @endif
+                @if($vehicleModel !== '')
+                    <span class="inline-flex items-center rounded-full bg-slate-100 px-3 py-1 text-slate-700">{{ $vehicleModel }}</span>
+                @endif
+                @if($vehicleYear > 0)
+                    <span class="inline-flex items-center rounded-full bg-slate-100 px-3 py-1 text-slate-700">{{ $vehicleYear }}</span>
+                @endif
+                @if($priceFrom !== '' || $priceTo !== '')
+                    <span class="inline-flex items-center rounded-full bg-slate-100 px-3 py-1 text-slate-700">
+                        Цена:
+                        {{ $priceFrom !== '' ? ' от ' . $priceFrom : '' }}
+                        {{ $priceTo !== '' ? ' до ' . $priceTo : '' }}
+                    </span>
+                @endif
+                @if($inStockOnly)
+                    <span class="inline-flex items-center rounded-full bg-slate-100 px-3 py-1 text-slate-700">Только в наличии</span>
+                @endif
+            </div>
+        @endif
+
         @if($products->isEmpty())
-            <p class="text-slate-600 py-12 text-center">В этой категории пока нет товаров.</p>
+            <p class="text-slate-600 py-12 text-center">По выбранным фильтрам товары не найдены.</p>
         @else
             <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
                 @foreach($products as $product)
@@ -119,6 +211,34 @@
                             @else
                                 <p class="mt-1 text-xs text-amber-600">Под заказ</p>
                             @endif
+                            @if($this->selectedVehicleLabel)
+                                <p class="mt-1 text-xs text-indigo-600">
+                                    Подходит для {{ $this->selectedVehicleLabel }}
+                                </p>
+                            @endif
+
+                            <div class="mt-3 rounded-lg bg-slate-50 border border-slate-200 p-3 space-y-1.5">
+                                @if($product->oemNumbers->isNotEmpty())
+                                    <p class="text-xs text-slate-600">
+                                        <span class="font-medium text-slate-700">OEM:</span>
+                                        <span class="font-mono">{{ $product->oemNumbers->take(2)->pluck('oem_number')->join(', ') }}</span>
+                                    </p>
+                                @endif
+
+                                @if($product->crossNumbers->isNotEmpty())
+                                    <p class="text-xs text-slate-600">
+                                        <span class="font-medium text-slate-700">Аналоги:</span>
+                                        <span class="font-mono">{{ $product->crossNumbers->take(2)->pluck('cross_number')->join(', ') }}</span>
+                                    </p>
+                                @endif
+
+                                @if(!$this->selectedVehicleLabel && $product->vehicles->isNotEmpty())
+                                    <p class="text-xs text-slate-600">
+                                        <span class="font-medium text-slate-700">Совместимость:</span>
+                                        {{ $product->vehicles->take(2)->map(fn ($vehicle) => $vehicle->make . ' ' . $vehicle->model)->join(', ') }}
+                                    </p>
+                                @endif
+                            </div>
                         </div>
                     </a>
                 @endforeach

@@ -23,6 +23,10 @@
                                   style="background-color: {{ $order->status->color ?? '#e2e8f0' }}30; color: {{ $order->status->color ?? '#64748b' }};">
                                 {{ $order->status->name }}
                             </span>
+                            <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium"
+                                  style="background-color: {{ $order->payment_status_color }}20; color: {{ $order->payment_status_color }};">
+                                {{ $order->payment_status_label }}
+                            </span>
                             <span class="font-semibold text-slate-900">{{ number_format((float) $order->total, 2) }} €</span>
                         </div>
                     </a>

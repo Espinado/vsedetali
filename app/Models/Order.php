@@ -6,6 +6,7 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 
 class Order extends Model
 {
@@ -78,13 +79,67 @@ class Order extends Model
         return $this->hasMany(Payment::class);
     }
 
+    public function latestPayment(): HasOne
+    {
+        return $this->hasOne(Payment::class)->latestOfMany();
+    }
+
     public function shipments(): HasMany
     {
         return $this->hasMany(Shipment::class);
     }
 
+    public function latestShipment(): HasOne
+    {
+        return $this->hasOne(Shipment::class)->latestOfMany();
+    }
+
     public function shippingAddress(): ?OrderAddress
     {
         return $this->orderAddresses()->where('type', 'shipping')->first();
+    }
+
+    public function getPaymentStatusLabelAttribute(): string
+    {
+        return match ($this->latestPayment?->status) {
+            'paid' => 'Оплачено',
+            'pending' => 'Ожидает оплаты',
+            'failed' => 'Ошибка оплаты',
+            default => 'Не оплачено',
+        };
+    }
+
+    public function getPaymentStatusColorAttribute(): string
+    {
+        return match ($this->latestPayment?->status) {
+            'paid' => 'rgb(22 163 74)',
+            'pending' => 'rgb(217 119 6)',
+            'failed' => 'rgb(220 38 38)',
+            default => 'rgb(100 116 139)',
+        };
+    }
+
+    public function getShipmentStatusLabelAttribute(): string
+    {
+        return match ($this->latestShipment?->status) {
+            'pending' => 'Ожидает сборки',
+            'packed' => 'Собран',
+            'shipped' => 'Отгружен',
+            'delivered' => 'Доставлен',
+            'cancelled' => 'Отгрузка отменена',
+            default => 'Отгрузка не создана',
+        };
+    }
+
+    public function getShipmentStatusColorAttribute(): string
+    {
+        return match ($this->latestShipment?->status) {
+            'pending' => 'rgb(217 119 6)',
+            'packed' => 'rgb(139 92 246)',
+            'shipped' => 'rgb(8 145 178)',
+            'delivered' => 'rgb(22 163 74)',
+            'cancelled' => 'rgb(220 38 38)',
+            default => 'rgb(100 116 139)',
+        };
     }
 }

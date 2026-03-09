@@ -64,6 +64,11 @@ class Product extends Model
             ->withTimestamps();
     }
 
+    public function productVehicles(): HasMany
+    {
+        return $this->hasMany(ProductVehicle::class);
+    }
+
     public function oemNumbers(): HasMany
     {
         return $this->hasMany(ProductOemNumber::class);

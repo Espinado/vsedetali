@@ -41,6 +41,26 @@ class OrderResource extends Resource
                 Tables\Columns\TextColumn::make('customer_name')->label('Клиент')->searchable(),
                 Tables\Columns\TextColumn::make('customer_email')->searchable(),
                 Tables\Columns\TextColumn::make('status.name')->label('Статус')->badge()->sortable(),
+                Tables\Columns\TextColumn::make('payment_status_label')
+                    ->label('Оплата')
+                    ->badge()
+                    ->color(fn (Order $record): string => match ($record->latestPayment?->status) {
+                        'paid' => 'success',
+                        'pending' => 'warning',
+                        'failed' => 'danger',
+                        default => 'gray',
+                    }),
+                Tables\Columns\TextColumn::make('shipment_status_label')
+                    ->label('Отгрузка')
+                    ->badge()
+                    ->color(fn (Order $record): string => match ($record->latestShipment?->status) {
+                        'pending' => 'warning',
+                        'packed' => 'info',
+                        'shipped' => 'primary',
+                        'delivered' => 'success',
+                        'cancelled' => 'danger',
+                        default => 'gray',
+                    }),
                 Tables\Columns\TextColumn::make('total')->money('EUR')->sortable(),
                 Tables\Columns\TextColumn::make('created_at')->dateTime()->sortable(),
             ])
@@ -95,6 +115,17 @@ class OrderResource extends Resource
                     ->schema([
                         Infolists\Components\TextEntry::make('shippingMethod.name')->label('Способ доставки'),
                         Infolists\Components\TextEntry::make('paymentMethod.name')->label('Способ оплаты'),
+                        Infolists\Components\TextEntry::make('payment_status_label')->label('Статус оплаты')->badge(),
+                        Infolists\Components\TextEntry::make('latestPayment.paid_at')->label('Оплачено')->dateTime()->placeholder('—'),
+                        Infolists\Components\TextEntry::make('latestPayment.gateway_reference')->label('Референс')->placeholder('—'),
+                    ])
+                    ->columns(3),
+                Infolists\Components\Section::make('Отгрузка')
+                    ->schema([
+                        Infolists\Components\TextEntry::make('shipment_status_label')->label('Статус отгрузки')->badge(),
+                        Infolists\Components\TextEntry::make('latestShipment.shippingMethod.name')->label('Служба доставки')->placeholder('—'),
+                        Infolists\Components\TextEntry::make('latestShipment.tracking_number')->label('Трек-номер')->placeholder('—'),
+                        Infolists\Components\TextEntry::make('latestShipment.shipped_at')->label('Дата отгрузки')->dateTime()->placeholder('—'),
                     ])
                     ->columns(2),
                 Infolists\Components\Section::make('Адрес доставки')
@@ -118,7 +149,14 @@ class OrderResource extends Resource
 
     public static function getRelations(): array
     {
-        return [];
+        return [
+            OrderResource\RelationManagers\ShipmentsRelationManager::class,
+        ];
+    }
+
+    public static function getEloquentQuery(): \Illuminate\Database\Eloquent\Builder
+    {
+        return parent::getEloquentQuery()->with(['latestPayment', 'latestShipment.shippingMethod', 'paymentMethod', 'status']);
     }
 
     public static function getPages(): array

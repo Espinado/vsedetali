@@ -136,6 +136,21 @@ class CheckoutWizard extends Component
         };
     }
 
+    protected function checkoutRules(): array
+    {
+        $currentStep = $this->step;
+
+        $this->step = 1;
+        $step1 = $this->rules();
+
+        $this->step = 2;
+        $step2 = $this->rules();
+
+        $this->step = $currentStep;
+
+        return array_merge($step1, $step2);
+    }
+
     public function step1Next(): void
     {
         $this->validate($this->rules());
@@ -155,7 +170,7 @@ class CheckoutWizard extends Component
 
     public function placeOrder(): void
     {
-        $this->validate($this->rules());
+        $this->validate($this->checkoutRules());
 
         $cart = $this->cart;
         if ($cart->cartItems->isEmpty()) {
@@ -201,8 +216,7 @@ class CheckoutWizard extends Component
                 $this->comment ?: ''
             );
             $this->dispatch('cart-updated');
-            session()->flash('success', 'Заказ #' . $order->id . ' успешно оформлен.');
-            $this->redirect(route('account.orders.show', $order), navigate: true);
+            $this->redirect(route('checkout.payment', $order), navigate: true);
         } catch (\Throwable $e) {
             $this->addError('order', $e->getMessage());
         }

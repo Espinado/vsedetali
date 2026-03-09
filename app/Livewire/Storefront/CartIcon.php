@@ -9,6 +9,11 @@ class CartIcon extends Component
 {
     protected $listeners = ['cart-updated' => 'refreshCount'];
 
+    public function openDrawer(): void
+    {
+        $this->dispatch('open-cart-drawer');
+    }
+
     public function getCountProperty(): int
     {
         return app(CartService::class)->getItemsCount();

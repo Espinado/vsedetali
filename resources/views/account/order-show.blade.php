@@ -9,9 +9,19 @@
         <a href="{{ route('account.orders.index') }}" class="text-indigo-600 hover:underline">← К списку заказов</a>
     </div>
 
-    <div class="mb-4 inline-flex items-center gap-2 px-3 py-1 rounded-full text-sm font-medium"
-         style="background-color: {{ $order->status->color ?? '#e2e8f0' }}20; color: {{ $order->status->color ?? '#64748b' }};">
-        {{ $order->status->name }}
+    <div class="mb-4 flex flex-wrap items-center gap-3">
+        <span class="inline-flex items-center gap-2 px-3 py-1 rounded-full text-sm font-medium"
+              style="background-color: {{ $order->status->color ?? '#e2e8f0' }}20; color: {{ $order->status->color ?? '#64748b' }};">
+            {{ $order->status->name }}
+        </span>
+        <span class="inline-flex items-center gap-2 px-3 py-1 rounded-full text-sm font-medium"
+              style="background-color: {{ $order->payment_status_color }}20; color: {{ $order->payment_status_color }};">
+            {{ $order->payment_status_label }}
+        </span>
+        <span class="inline-flex items-center gap-2 px-3 py-1 rounded-full text-sm font-medium"
+              style="background-color: {{ $order->shipment_status_color }}20; color: {{ $order->shipment_status_color }};">
+            {{ $order->shipment_status_label }}
+        </span>
     </div>
 
     <div class="grid gap-6 md:grid-cols-2 mb-8">
@@ -87,6 +97,21 @@
         </div>
     @endif
 
-    <p class="mt-6 text-slate-500 text-sm">Оплата: {{ $order->paymentMethod->name ?? '—' }}</p>
+    <div class="mt-6 p-4 bg-slate-50 rounded-lg">
+        <h3 class="font-medium text-slate-700 mb-2">Отгрузка</h3>
+        <div class="space-y-1 text-sm text-slate-600">
+            <p>Статус: <span class="font-medium" style="color: {{ $order->shipment_status_color }};">{{ $order->shipment_status_label }}</span></p>
+            <p>Способ доставки: {{ $order->latestShipment?->shippingMethod?->name ?? $order->shippingMethod->name ?? '—' }}</p>
+            <p>Трек-номер: {{ $order->latestShipment?->tracking_number ?: '—' }}</p>
+            <p>Дата отгрузки: {{ $order->latestShipment?->shipped_at?->format('d.m.Y H:i') ?: '—' }}</p>
+        </div>
+    </div>
+
+    <div class="mt-6 text-sm text-slate-500 space-y-1">
+        <p>Оплата: {{ $order->paymentMethod->name ?? '—' }}</p>
+        @if ($order->latestPayment?->paid_at)
+            <p>Оплачено: {{ $order->latestPayment->paid_at->format('d.m.Y H:i') }}</p>
+        @endif
+    </div>
 </div>
 @endsection

@@ -26,6 +26,7 @@ class AddToCartButton extends Component
         app(CartService::class)->addItem($this->product, $this->quantity);
 
         $this->dispatch('cart-updated');
+        $this->dispatch('open-cart-drawer');
         session()->flash('success', 'Товар добавлен в корзину.');
         $this->quantity = 1;
     }

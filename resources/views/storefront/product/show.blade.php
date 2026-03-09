@@ -59,6 +59,47 @@
                 @endif
             </p>
 
+            @if($product->oemNumbers->isNotEmpty() || $product->crossNumbers->isNotEmpty() || $product->vehicles->isNotEmpty())
+                <div class="mb-6 rounded-xl border border-slate-200 bg-slate-50 p-4">
+                    <h2 class="text-sm font-semibold text-slate-800 mb-3">Быстрая информация</h2>
+
+                    <div class="space-y-2 text-sm">
+                        @if($product->oemNumbers->isNotEmpty())
+                            <div>
+                                <p class="text-slate-500 mb-1">OEM номера</p>
+                                <p class="font-mono text-slate-800">{{ $product->oemNumbers->take(5)->pluck('oem_number')->join(', ') }}</p>
+                            </div>
+                        @endif
+
+                        @if($product->crossNumbers->isNotEmpty())
+                            <div>
+                                <p class="text-slate-500 mb-1">Аналоги</p>
+                                <p class="font-mono text-slate-800">{{ $product->crossNumbers->take(5)->pluck('cross_number')->join(', ') }}</p>
+                            </div>
+                        @endif
+
+                        @if($product->vehicles->isNotEmpty())
+                            <div>
+                                <p class="text-slate-500 mb-1">Совместимость</p>
+                                <div class="flex flex-wrap gap-2">
+                                    @foreach($product->vehicles->take(4) as $vehicle)
+                                        <span class="inline-flex items-center rounded-full bg-white px-3 py-1 text-xs text-slate-700 border border-slate-200">
+                                            {{ $vehicle->make }} {{ $vehicle->model }}
+                                            @if($vehicle->year_from || $vehicle->year_to)
+                                                ({{ $vehicle->year_from ?? '—' }}–{{ $vehicle->year_to ?? '—' }})
+                                            @endif
+                                        </span>
+                                    @endforeach
+                                </div>
+                                @if($product->vehicles->count() > 4)
+                                    <p class="mt-2 text-xs text-slate-500">И ещё {{ $product->vehicles->count() - 4 }} совместимых вариантов</p>
+                                @endif
+                            </div>
+                        @endif
+                    </div>
+                </div>
+            @endif
+
             @if($product->short_description)
                 <p class="text-slate-600 mb-6">{{ $product->short_description }}</p>
             @endif
