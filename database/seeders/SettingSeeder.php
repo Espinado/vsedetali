@@ -14,7 +14,7 @@ class SettingSeeder extends Seeder
             ['key' => 'store_email', 'value' => 'info@vsedetalki.ru', 'group' => 'general'],
             ['key' => 'store_phone', 'value' => '', 'group' => 'general'],
             ['key' => 'currency', 'value' => 'EUR', 'group' => 'general'],
-            ['key' => 'orders_notify_email', 'value' => 'orders@vsedetalki.ru', 'group' => 'orders'],
+            ['key' => 'orders_notify_email', 'value' => 'jevgen@vsedetalki.ru', 'group' => 'orders'],
         ];
 
         foreach ($settings as $item) {

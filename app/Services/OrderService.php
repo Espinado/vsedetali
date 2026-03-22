@@ -8,7 +8,9 @@ use App\Models\OrderAddress;
 use App\Models\OrderItem;
 use App\Models\Payment;
 use App\Mail\OrderConfirmedMail;
+use App\Mail\OrderNewAdminMail;
 use App\Models\OrderStatus;
+use App\Models\Setting;
 use App\Models\ShippingMethod;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Mail;
@@ -119,6 +121,15 @@ class OrderService
                 Mail::to($order->customer_email)->send(new OrderConfirmedMail($order));
             } catch (\Throwable $e) {
                 report($e);
+            }
+
+            $notifyEmail = trim((string) Setting::get('orders_notify_email', ''));
+            if ($notifyEmail !== '' && filter_var($notifyEmail, FILTER_VALIDATE_EMAIL)) {
+                try {
+                    Mail::to($notifyEmail)->send(new OrderNewAdminMail($order));
+                } catch (\Throwable $e) {
+                    report($e);
+                }
             }
 
             return $order;
