@@ -10,8 +10,8 @@
                 @foreach($this->items as $item)
                     <li class="flex flex-col sm:flex-row gap-4 p-4 sm:items-center">
                         <a href="{{ route('product.show', $item->product) }}" class="shrink-0 w-20 h-20 sm:w-24 sm:h-24 rounded-lg bg-slate-100 overflow-hidden flex items-center justify-center">
-                            @if($item->product->mainImage)
-                                <img src="{{ asset('storage/' . $item->product->mainImage->path) }}" alt="" class="w-full h-full object-cover">
+                            @if($item->product->mainImage?->storage_url)
+                                <img src="{{ $item->product->mainImage->storage_url }}" alt="" class="w-full h-full object-cover">
                             @else
                                 <span class="text-slate-400 text-xs">Нет фото</span>
                             @endif

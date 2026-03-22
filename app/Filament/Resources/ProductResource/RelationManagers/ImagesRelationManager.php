@@ -22,7 +22,9 @@ class ImagesRelationManager extends RelationManager
             ->schema([
                 Forms\Components\FileUpload::make('path')
                     ->image()
+                    ->disk('public')
                     ->directory('products')
+                    ->visibility('public')
                     ->required()
                     ->label('Файл'),
                 Forms\Components\TextInput::make('alt')

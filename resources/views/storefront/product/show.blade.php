@@ -16,7 +16,7 @@
         <div class="lg:w-1/2 shrink-0">
             <div class="aspect-square rounded-lg border border-slate-200 bg-slate-100 overflow-hidden mb-4">
                 @if($product->images->isNotEmpty())
-                    <img src="{{ asset('storage/' . $product->images->first()->path) }}"
+                    <img src="{{ $product->images->first()->storage_url }}"
                          alt="{{ $product->images->first()->alt ?? $product->name }}"
                          class="w-full h-full object-contain"
                          id="product-main-image">
@@ -29,8 +29,8 @@
                     @foreach($product->images as $image)
                         <button type="button"
                                 class="w-16 h-16 shrink-0 rounded border-2 border-slate-200 hover:border-slate-400 overflow-hidden focus:border-slate-600"
-                                onclick="document.getElementById('product-main-image').src = '{{ asset('storage/' . $image->path) }}'">
-                            <img src="{{ asset('storage/' . $image->path) }}" alt="" class="w-full h-full object-cover">
+                                onclick="document.getElementById('product-main-image').src = '{{ $image->storage_url }}'">
+                            <img src="{{ $image->storage_url }}" alt="" class="w-full h-full object-cover">
                         </button>
                     @endforeach
                 </div>

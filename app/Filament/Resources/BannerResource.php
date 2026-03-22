@@ -31,7 +31,9 @@ class BannerResource extends Resource
                     ->label('Название'),
                 Forms\Components\FileUpload::make('image')
                     ->image()
+                    ->disk('public')
                     ->directory('banners')
+                    ->visibility('public')
                     ->required()
                     ->label('Изображение'),
                 Forms\Components\TextInput::make('link')
@@ -58,7 +60,10 @@ class BannerResource extends Resource
         return $table
             ->columns([
                 Tables\Columns\TextColumn::make('name')->searchable(),
-                Tables\Columns\ImageColumn::make('image')->circular()->label('Изображение'),
+                Tables\Columns\ImageColumn::make('image')
+                    ->disk('public')
+                    ->circular()
+                    ->label('Изображение'),
                 Tables\Columns\TextColumn::make('link')->limit(30),
                 Tables\Columns\TextColumn::make('sort')->sortable(),
                 Tables\Columns\IconColumn::make('is_active')->boolean()->sortable(),

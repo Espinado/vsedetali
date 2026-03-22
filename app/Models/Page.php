@@ -13,6 +13,9 @@ class Page extends Model
         'title',
         'slug',
         'body',
+        'contact_email',
+        'contact_phone',
+        'contact_address',
         'is_active',
     ];
 
@@ -26,5 +29,10 @@ class Page extends Model
     public function scopeActive($query)
     {
         return $query->where('is_active', true);
+    }
+
+    public function isContactsPage(): bool
+    {
+        return $this->slug === 'contacts';
     }
 }

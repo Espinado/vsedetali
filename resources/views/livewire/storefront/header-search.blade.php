@@ -37,9 +37,9 @@
                             class="flex items-center gap-3 px-4 py-3 hover:bg-slate-50"
                         >
                             <div class="h-14 w-14 shrink-0 overflow-hidden rounded bg-slate-100">
-                                @if ($product->mainImage)
+                                @if ($product->mainImage?->storage_url)
                                     <img
-                                        src="{{ asset('storage/' . $product->mainImage->path) }}"
+                                        src="{{ $product->mainImage->storage_url }}"
                                         alt="{{ $product->mainImage->alt ?? $product->name }}"
                                         class="h-full w-full object-cover"
                                     >

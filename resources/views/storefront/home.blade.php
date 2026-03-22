@@ -6,16 +6,18 @@
     <div class="mb-10">
         @if($banners->isNotEmpty())
             @php $banner = $banners->first(); @endphp
-            <div class="rounded-xl overflow-hidden bg-slate-100 mb-10">
-                @if($href = $banner->resolvedHref())
-                    <a href="{{ $href }}" class="block focus:outline-none focus-visible:ring-2 focus-visible:ring-slate-400 rounded-xl"
-                       @if($banner->linkOpensInNewTab()) target="_blank" rel="noopener noreferrer" @endif>
-                        <img src="{{ asset('storage/' . $banner->image) }}" alt="{{ $banner->name ?? '' }}" class="w-full h-48 sm:h-64 md:h-80 object-cover">
-                    </a>
-                @else
-                    <img src="{{ asset('storage/' . $banner->image) }}" alt="{{ $banner->name ?? '' }}" class="w-full h-48 sm:h-64 md:h-80 object-cover">
-                @endif
-            </div>
+            @if($bannerImg = $banner->imageUrl())
+                <div class="rounded-xl overflow-hidden bg-slate-100 mb-10">
+                    @if($href = $banner->resolvedHref())
+                        <a href="{{ $href }}" class="block focus:outline-none focus-visible:ring-2 focus-visible:ring-slate-400 rounded-xl"
+                           @if($banner->linkOpensInNewTab()) target="_blank" rel="noopener noreferrer" @endif>
+                            <img src="{{ $bannerImg }}" alt="{{ $banner->name ?? '' }}" class="w-full h-48 sm:h-64 md:h-80 object-cover">
+                        </a>
+                    @else
+                        <img src="{{ $bannerImg }}" alt="{{ $banner->name ?? '' }}" class="w-full h-48 sm:h-64 md:h-80 object-cover">
+                    @endif
+                </div>
+            @endif
         @endif
 
         <div class="text-center mb-10">
@@ -32,8 +34,8 @@
                         <a href="{{ route('product.show', $product) }}"
                            class="group bg-white rounded-lg border border-slate-200 overflow-hidden hover:border-slate-300 hover:shadow-md transition">
                             <div class="aspect-square bg-slate-100 flex items-center justify-center overflow-hidden">
-                                @if($product->mainImage)
-                                    <img src="{{ asset('storage/' . $product->mainImage->path) }}"
+                                @if($product->mainImage?->storage_url)
+                                    <img src="{{ $product->mainImage->storage_url }}"
                                          alt="{{ $product->mainImage->alt ?? $product->name }}"
                                          class="w-full h-full object-cover group-hover:scale-105 transition">
                                 @else

@@ -34,9 +34,9 @@
                             @foreach($this->items as $item)
                                 <div class="flex gap-3 rounded-xl border border-slate-200 p-3" wire:key="drawer-item-{{ $item->id }}">
                                     <a href="{{ route('product.show', $item->product) }}" class="h-20 w-20 shrink-0 overflow-hidden rounded bg-slate-100">
-                                        @if($item->product?->mainImage)
+                                        @if($item->product?->mainImage?->storage_url)
                                             <img
-                                                src="{{ asset('storage/' . $item->product->mainImage->path) }}"
+                                                src="{{ $item->product->mainImage->storage_url }}"
                                                 alt="{{ $item->product->mainImage->alt ?? $item->product->name }}"
                                                 class="h-full w-full object-cover"
                                             >

@@ -22,20 +22,49 @@ class PageResource extends Resource
 
     protected static ?int $navigationSort = 20;
 
+    protected static ?string $navigationLabel = 'Страницы сайта';
+
+    protected static ?string $modelLabel = 'страница';
+
+    protected static ?string $pluralModelLabel = 'Страницы';
+
     public static function form(Form $form): Form
     {
         return $form
             ->schema([
                 Forms\Components\TextInput::make('title')
+                    ->label('Заголовок')
                     ->required()
                     ->maxLength(255),
                 Forms\Components\TextInput::make('slug')
+                    ->label('Slug (URL)')
                     ->required()
                     ->maxLength(255)
-                    ->unique(ignoreRecord: true),
+                    ->unique(ignoreRecord: true)
+                    ->helperText('Адрес на сайте: /page/{slug}. Для контактов оставьте contacts.'),
+                Forms\Components\Section::make('Контакты')
+                    ->description('На витрине используется только для страницы со slug «contacts» (/page/contacts). Для «Доставка» / «Оплата» можно не заполнять.')
+                    ->schema([
+                        Forms\Components\TextInput::make('contact_email')
+                            ->label('Email')
+                            ->email()
+                            ->maxLength(255),
+                        Forms\Components\TextInput::make('contact_phone')
+                            ->label('Телефон')
+                            ->maxLength(100),
+                        Forms\Components\Textarea::make('contact_address')
+                            ->label('Адрес')
+                            ->rows(3)
+                            ->columnSpanFull(),
+                    ])
+                    ->columns(2)
+                    ->collapsible(),
                 Forms\Components\RichEditor::make('body')
+                    ->label('Текст страницы')
+                    ->helperText('Для «Контактов» — необязательный блок под карточкой (режим работы и т.д.)')
                     ->columnSpanFull(),
                 Forms\Components\Toggle::make('is_active')
+                    ->label('Активна на сайте')
                     ->default(true),
             ]);
     }
@@ -44,16 +73,39 @@ class PageResource extends Resource
     {
         return $table
             ->columns([
-                Tables\Columns\TextColumn::make('title')->searchable()->sortable(),
-                Tables\Columns\TextColumn::make('slug')->searchable(),
-                Tables\Columns\IconColumn::make('is_active')->boolean()->sortable(),
+                Tables\Columns\TextColumn::make('title')
+                    ->label('Заголовок')
+                    ->searchable()
+                    ->sortable(),
+                Tables\Columns\TextColumn::make('slug')
+                    ->label('Slug')
+                    ->searchable()
+                    ->copyable(),
+                Tables\Columns\IconColumn::make('is_active')
+                    ->label('На сайте')
+                    ->boolean()
+                    ->sortable(),
+                Tables\Columns\TextColumn::make('updated_at')
+                    ->label('Обновлено')
+                    ->dateTime()
+                    ->sortable()
+                    ->toggleable(isToggledHiddenByDefault: true),
             ])
             ->defaultSort('title')
             ->filters([])
-            ->actions([Tables\Actions\EditAction::make()])
+            ->actions([
+                Tables\Actions\Action::make('open_site')
+                    ->label('На сайте')
+                    ->icon('heroicon-o-arrow-top-right-on-square')
+                    ->url(fn (Page $record): string => route('page.show', ['slug' => $record->slug]))
+                    ->openUrlInNewTab()
+                    ->visible(fn (Page $record): bool => $record->is_active),
+                Tables\Actions\EditAction::make()->label('Изменить'),
+                Tables\Actions\DeleteAction::make()->label('Удалить'),
+            ])
             ->bulkActions([
                 Tables\Actions\BulkActionGroup::make([
-                    Tables\Actions\DeleteBulkAction::make(),
+                    Tables\Actions\DeleteBulkAction::make()->label('Удалить выбранные'),
                 ]),
             ]);
     }

@@ -186,8 +186,8 @@
                     <a href="{{ route('product.show', $product) }}"
                        class="group bg-white rounded-lg border border-slate-200 overflow-hidden hover:border-slate-300 hover:shadow-md transition">
                         <div class="aspect-square bg-slate-100 flex items-center justify-center overflow-hidden">
-                            @if($product->mainImage)
-                                <img src="{{ asset('storage/' . $product->mainImage->path) }}"
+                            @if($product->mainImage?->storage_url)
+                                <img src="{{ $product->mainImage->storage_url }}"
                                      alt="{{ $product->mainImage->alt ?? $product->name }}"
                                      class="w-full h-full object-cover group-hover:scale-105 transition">
                             @else
