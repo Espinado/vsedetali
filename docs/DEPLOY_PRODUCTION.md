@@ -42,3 +42,14 @@ cd ~/public_html
   ```
 
 Пропуск строк настраивается в `config/geely_bamboo_import.php`.
+
+## Дубликаты марок авто (Geely / GEELY)
+
+После старых импортов в фильтре могли остаться разные написания одной марки:
+
+```bash
+php artisan vehicles:normalize-labels --dry-run
+php artisan vehicles:normalize-labels
+```
+
+Категории со slug `import-*` на витрине скрыты (`config/storefront.php`).

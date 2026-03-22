@@ -69,12 +69,32 @@ class ProductGrid extends Component
 
     public function mount(?string $categorySlug = null): void
     {
+        if ($this->isCatalogHiddenCategorySlug($categorySlug)) {
+            $this->redirect(route('catalog'), navigate: true);
+
+            return;
+        }
+
         $this->categorySlug = $categorySlug;
+    }
+
+    /**
+     * Служебные категории импорта (slug import-*) не участвуют в каталоге на витрине.
+     */
+    protected function isCatalogHiddenCategorySlug(?string $slug): bool
+    {
+        if ($slug === null || $slug === '') {
+            return false;
+        }
+
+        $prefix = (string) config('storefront.hidden_category_slug_prefix', 'import-');
+
+        return str_starts_with($slug, $prefix);
     }
 
     public function getCategoryProperty(): ?Category
     {
-        if (!$this->categorySlug) {
+        if (! $this->categorySlug || $this->isCatalogHiddenCategorySlug($this->categorySlug)) {
             return null;
         }
 
@@ -83,7 +103,18 @@ class ProductGrid extends Component
 
     public function getRootCategoriesProperty()
     {
-        return Category::active()->roots()->with('children')->orderBy('sort')->get();
+        $prefix = (string) config('storefront.hidden_category_slug_prefix', 'import-');
+        $like = str_replace(['\\', '%', '_'], ['\\\\', '\\%', '\\_'], $prefix).'%';
+
+        return Category::query()
+            ->active()
+            ->roots()
+            ->where('slug', 'not like', $like)
+            ->with(['children' => function ($q) use ($like) {
+                $q->where('is_active', true)->where('slug', 'not like', $like);
+            }])
+            ->orderBy('sort')
+            ->get();
     }
 
     public function getBrandsInCategoryProperty()

@@ -29,6 +29,32 @@ class Banner extends Model
         ];
     }
 
+    /**
+     * Нормализованный URL для ссылки или null, если ссылка не задана.
+     */
+    public function resolvedHref(): ?string
+    {
+        $raw = trim((string) ($this->link ?? ''));
+        if ($raw === '') {
+            return null;
+        }
+        if (str_starts_with($raw, '/')) {
+            return url($raw);
+        }
+        if (preg_match('#^https?://#i', $raw)) {
+            return $raw;
+        }
+
+        return 'https://'.ltrim($raw, '/');
+    }
+
+    public function linkOpensInNewTab(): bool
+    {
+        $raw = trim((string) ($this->link ?? ''));
+
+        return $raw !== '' && ! str_starts_with($raw, '/');
+    }
+
     public function scopeActive($query)
     {
         return $query->where('is_active', true)

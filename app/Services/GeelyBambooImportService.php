@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Models\Brand;
 use App\Models\Category;
+use App\Support\VehicleLabelNormalizer;
 use App\Models\Product;
 use App\Models\Stock;
 use App\Models\Vehicle;
@@ -107,10 +108,10 @@ class GeelyBambooImportService
                 if ($vehicleCell !== '') {
                     $tokens = preg_split('/\s+/u', $vehicleCell, -1, PREG_SPLIT_NO_EMPTY) ?: [];
                     if (count($tokens) >= 2) {
-                        $lastMake = $tokens[0];
-                        $lastModel = $tokens[1];
+                        $lastMake = VehicleLabelNormalizer::title($tokens[0]);
+                        $lastModel = VehicleLabelNormalizer::title($tokens[1]);
                     } elseif (count($tokens) === 1) {
-                        $lastMake = $tokens[0];
+                        $lastMake = VehicleLabelNormalizer::title($tokens[0]);
                         $lastModel = null;
                     }
                 }

@@ -7,9 +7,14 @@
         @if($banners->isNotEmpty())
             @php $banner = $banners->first(); @endphp
             <div class="rounded-xl overflow-hidden bg-slate-100 mb-10">
-                <a href="{{ $banner->link ?: '#' }}" @if($banner->link) target="_blank" rel="noopener" @endif>
+                @if($href = $banner->resolvedHref())
+                    <a href="{{ $href }}" class="block focus:outline-none focus-visible:ring-2 focus-visible:ring-slate-400 rounded-xl"
+                       @if($banner->linkOpensInNewTab()) target="_blank" rel="noopener noreferrer" @endif>
+                        <img src="{{ asset('storage/' . $banner->image) }}" alt="{{ $banner->name ?? '' }}" class="w-full h-48 sm:h-64 md:h-80 object-cover">
+                    </a>
+                @else
                     <img src="{{ asset('storage/' . $banner->image) }}" alt="{{ $banner->name ?? '' }}" class="w-full h-48 sm:h-64 md:h-80 object-cover">
-                </a>
+                @endif
             </div>
         @endif
 
