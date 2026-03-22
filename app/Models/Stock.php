@@ -15,6 +15,7 @@ class Stock extends Model
         'warehouse_id',
         'quantity',
         'reserved_quantity',
+        'days_in_warehouse',
         'seller_id',
     ];
 
@@ -23,6 +24,7 @@ class Stock extends Model
         return [
             'quantity' => 'integer',
             'reserved_quantity' => 'integer',
+            'days_in_warehouse' => 'integer',
         ];
     }
 

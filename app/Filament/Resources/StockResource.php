@@ -38,16 +38,21 @@ class StockResource extends Resource
                     ->required()
                     ->helperText('Для каждого товара и склада должна быть одна запись остатка.'),
                 Forms\Components\TextInput::make('quantity')
-                    ->label('Количество')
+                    ->label('Остаток на складе')
                     ->numeric()
                     ->required()
                     ->default(0)
                     ->minValue(0),
                 Forms\Components\TextInput::make('reserved_quantity')
-                    ->label('Зарезервировано')
+                    ->label('Резерв')
                     ->numeric()
                     ->required()
                     ->default(0)
+                    ->minValue(0),
+                Forms\Components\TextInput::make('days_in_warehouse')
+                    ->label('Дней на складе')
+                    ->numeric()
+                    ->nullable()
                     ->minValue(0),
             ]);
     }
@@ -56,28 +61,53 @@ class StockResource extends Resource
     {
         return $table
             ->columns([
-                Tables\Columns\TextColumn::make('product.name')
-                    ->label('Товар')
+                Tables\Columns\TextColumn::make('product.code')
+                    ->label('Код')
                     ->searchable()
-                    ->sortable(),
+                    ->sortable()
+                    ->toggleable(),
                 Tables\Columns\TextColumn::make('product.sku')
-                    ->label('SKU')
+                    ->label('Артикул')
                     ->searchable()
                     ->toggleable(),
+                Tables\Columns\TextColumn::make('product.name')
+                    ->label('Наименование')
+                    ->searchable()
+                    ->sortable(),
                 Tables\Columns\TextColumn::make('warehouse.name')
                     ->label('Склад')
                     ->searchable()
                     ->sortable(),
                 Tables\Columns\TextColumn::make('quantity')
-                    ->label('Количество')
+                    ->label('Остаток')
                     ->sortable(),
                 Tables\Columns\TextColumn::make('reserved_quantity')
-                    ->label('Зарезервировано')
+                    ->label('Резерв')
                     ->sortable(),
                 Tables\Columns\TextColumn::make('available_quantity')
                     ->label('Доступно')
                     ->state(fn (Stock $record): int => $record->available_quantity)
                     ->sortable(query: fn ($query, string $direction) => $query->orderByRaw('(quantity - reserved_quantity) ' . $direction)),
+                Tables\Columns\TextColumn::make('product.cost_price')
+                    ->label('Себестоимость')
+                    ->money('EUR')
+                    ->toggleable(),
+                Tables\Columns\TextColumn::make('cost_total')
+                    ->label('Сумма себестоимости')
+                    ->state(fn (Stock $record): string => number_format((float) $record->quantity * (float) ($record->product?->cost_price ?? 0), 2, '.', ' '))
+                    ->toggleable(),
+                Tables\Columns\TextColumn::make('product.price')
+                    ->label('Продажная цена')
+                    ->money('EUR')
+                    ->toggleable(),
+                Tables\Columns\TextColumn::make('sale_total')
+                    ->label('Сумма продажи')
+                    ->state(fn (Stock $record): string => number_format((float) $record->quantity * (float) ($record->product?->price ?? 0), 2, '.', ' '))
+                    ->toggleable(),
+                Tables\Columns\TextColumn::make('days_in_warehouse')
+                    ->label('Дней на складе')
+                    ->sortable()
+                    ->toggleable(),
                 Tables\Columns\TextColumn::make('updated_at')
                     ->label('Обновлено')
                     ->since()

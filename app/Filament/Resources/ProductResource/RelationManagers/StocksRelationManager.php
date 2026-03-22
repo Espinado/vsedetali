@@ -23,13 +23,20 @@ class StocksRelationManager extends RelationManager
                     ->required()
                     ->searchable(),
                 Forms\Components\TextInput::make('quantity')
+                    ->label('Остаток на складе')
                     ->numeric()
                     ->required()
                     ->default(0)
                     ->minValue(0),
                 Forms\Components\TextInput::make('reserved_quantity')
+                    ->label('Резерв')
                     ->numeric()
                     ->default(0)
+                    ->minValue(0),
+                Forms\Components\TextInput::make('days_in_warehouse')
+                    ->label('Дней на складе')
+                    ->numeric()
+                    ->nullable()
                     ->minValue(0),
             ]);
     }
@@ -40,11 +47,12 @@ class StocksRelationManager extends RelationManager
             ->recordTitleAttribute('id')
             ->columns([
                 Tables\Columns\TextColumn::make('warehouse.name')->label('Склад')->sortable(),
-                Tables\Columns\TextColumn::make('quantity')->sortable()->label('Кол-во'),
-                Tables\Columns\TextColumn::make('reserved_quantity')->sortable()->label('Зарезерв.'),
+                Tables\Columns\TextColumn::make('quantity')->sortable()->label('Остаток'),
+                Tables\Columns\TextColumn::make('reserved_quantity')->sortable()->label('Резерв'),
                 Tables\Columns\TextColumn::make('available_quantity')
                     ->label('Доступно')
                     ->state(fn ($record) => $record->available_quantity),
+                Tables\Columns\TextColumn::make('days_in_warehouse')->label('Дней на складе')->sortable(),
             ])
             ->defaultSort('warehouse_id')
             ->headerActions([

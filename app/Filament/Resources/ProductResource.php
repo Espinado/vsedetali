@@ -28,16 +28,20 @@ class ProductResource extends Resource
             ->schema([
                 Forms\Components\Select::make('category_id')
                     ->relationship('category', 'name')
-                    ->required()
                     ->searchable(),
                 Forms\Components\Select::make('brand_id')
                     ->relationship('brand', 'name')
-                    ->required()
                     ->searchable(),
+                Forms\Components\TextInput::make('code')
+                    ->label('Код')
+                    ->maxLength(50)
+                    ->nullable(),
                 Forms\Components\TextInput::make('sku')
+                    ->label('Артикул')
                     ->maxLength(255)
                     ->nullable(),
                 Forms\Components\TextInput::make('name')
+                    ->label('Наименование')
                     ->required()
                     ->maxLength(255),
                 Forms\Components\TextInput::make('slug')
@@ -51,8 +55,14 @@ class ProductResource extends Resource
                     ->numeric()
                     ->nullable(),
                 Forms\Components\TextInput::make('price')
+                    ->label('Продажная цена')
                     ->required()
                     ->numeric()
+                    ->prefix('€'),
+                Forms\Components\TextInput::make('cost_price')
+                    ->label('Себестоимость')
+                    ->numeric()
+                    ->nullable()
                     ->prefix('€'),
                 Forms\Components\TextInput::make('vat_rate')
                     ->numeric()
@@ -66,11 +76,13 @@ class ProductResource extends Resource
     {
         return $table
             ->columns([
-                Tables\Columns\TextColumn::make('sku')->searchable()->sortable(),
-                Tables\Columns\TextColumn::make('name')->searchable()->sortable(),
+                Tables\Columns\TextColumn::make('code')->label('Код')->searchable()->sortable()->toggleable(),
+                Tables\Columns\TextColumn::make('sku')->label('Артикул')->searchable()->sortable(),
+                Tables\Columns\TextColumn::make('name')->label('Наименование')->searchable()->sortable(),
                 Tables\Columns\TextColumn::make('category.name')->label('Категория')->sortable(),
                 Tables\Columns\TextColumn::make('brand.name')->label('Бренд')->sortable(),
-                Tables\Columns\TextColumn::make('price')->money('EUR')->sortable(),
+                Tables\Columns\TextColumn::make('price')->label('Продажная цена')->money('EUR')->sortable(),
+                Tables\Columns\TextColumn::make('cost_price')->label('Себестоимость')->money('EUR')->sortable()->toggleable(),
                 Tables\Columns\IconColumn::make('is_active')->boolean()->sortable(),
             ])
             ->defaultSort('name')

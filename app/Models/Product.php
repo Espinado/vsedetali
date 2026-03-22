@@ -15,6 +15,7 @@ class Product extends Model
     protected $fillable = [
         'category_id',
         'brand_id',
+        'code',
         'sku',
         'name',
         'slug',
@@ -22,6 +23,7 @@ class Product extends Model
         'short_description',
         'weight',
         'price',
+        'cost_price',
         'vat_rate',
         'is_active',
         'type',
@@ -32,6 +34,7 @@ class Product extends Model
         return [
             'weight' => 'decimal:3',
             'price' => 'decimal:2',
+            'cost_price' => 'decimal:2',
             'vat_rate' => 'decimal:2',
             'is_active' => 'boolean',
         ];
