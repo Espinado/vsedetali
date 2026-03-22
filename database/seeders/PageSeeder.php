@@ -23,7 +23,7 @@ class PageSeeder extends Seeder
             [
                 'slug' => 'contacts',
                 'title' => 'Контакты',
-                'body' => '<p>Email: info@vsedetali.test</p><p>Телефон: +370 XXX XXXXX</p><p>Адрес: г. Вильнюс, ул. Примерная, 1</p>',
+                'body' => '<p>Email: info@vsedetalki.ru</p><p>Телефон: +370 XXX XXXXX</p><p>Адрес: г. Вильнюс, ул. Примерная, 1</p>',
             ],
         ];
 

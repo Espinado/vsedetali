@@ -14,7 +14,7 @@
         @endif
 
         <div class="text-center mb-10">
-            <h1 class="text-3xl font-bold text-slate-800 mb-2">VSEDETALI</h1>
+            <h1 class="text-3xl font-bold text-slate-800 mb-2">{{ $storeName }}</h1>
             <p class="text-slate-600 mb-6">Интернет-магазин автозапчастей</p>
             <a href="{{ route('catalog') }}" class="inline-block px-6 py-3 bg-slate-800 text-white rounded-lg hover:bg-slate-700 font-medium">Перейти в каталог</a>
         </div>

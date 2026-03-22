@@ -15,10 +15,7 @@ class DatabaseSeeder extends Seeder
             PaymentMethodSeeder::class,
             SettingSeeder::class,
             WarehouseSeeder::class,
-            CategorySeeder::class,
-            BrandSeeder::class,
-            ProductSeeder::class,
-            VehicleSeeder::class,
+            GeelyBambooCatalogSeeder::class,
             PageSeeder::class,
             BannerSeeder::class,
         ]);

@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="csrf-token" content="{{ csrf_token() }}">
-    <title>@yield('title', $title ?? 'VSEDETALI') — {{ \App\Models\Setting::get('store_name', config('app.name')) }}</title>
+    <title>@yield('title', $title ?? $storeName) — {{ $storeName }}</title>
     @vite(['resources/css/app.css', 'resources/js/app.js'])
     @livewireStyles
 </head>
@@ -13,7 +13,7 @@
         <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
             <div class="flex flex-col gap-3 py-3 md:flex-row md:items-center md:justify-between md:py-4">
                 <div class="flex items-center justify-between gap-4 md:w-auto">
-                    <a href="{{ route('home') }}" class="font-semibold text-xl text-slate-800">VSEDETALI</a>
+                    <a href="{{ route('home') }}" class="font-semibold text-xl text-slate-800">{{ $storeName }}</a>
                     <a href="{{ route('catalog') }}" class="text-slate-600 hover:text-slate-900 md:hidden">Каталог</a>
                 </div>
 
@@ -62,7 +62,7 @@
         <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
             <div class="flex flex-col md:flex-row justify-between gap-4">
                 <div>
-                    <span class="font-semibold text-white">VSEDETALI</span>
+                    <span class="font-semibold text-white">{{ $storeName }}</span>
                     <p class="text-sm mt-1">Интернет-магазин автозапчастей</p>
                 </div>
                 <div class="flex gap-6">

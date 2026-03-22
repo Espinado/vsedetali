@@ -1,4 +1,4 @@
-# Структура Laravel-проекта (VSEDETALI)
+# Структура Laravel-проекта (vsedetalki)
 
 Структура приложения для интернет-магазина автозапчастей на Laravel 12 + Livewire с разделением на витрину (storefront), личный кабинет (account) и админку (admin).
 
@@ -255,16 +255,19 @@ app/Enums/
 
 ```
 database/seeders/
-├── DatabaseSeeder.php          # Вызов всех сидеров по порядку
-├── RoleAndPermissionSeeder.php # Роли: customer, admin, manager, … + права (Spatie)
-├── OrderStatusSeeder.php       # new, confirmed, shipped, delivered, cancelled
-├── ShippingMethodSeeder.php    # Курьер, почта, самовывоз
-├── PaymentMethodSeeder.php    # Карта, перевод, наличные
-├── SettingSeeder.php           # Базовые настройки магазина
-├── CategorySeeder.php          # Опционально: дерево категорий для разработки
-├── WarehouseSeeder.php        # Один склад по умолчанию
-└── AdminUserSeeder.php         # Первый админ (опционально, по env)
+├── DatabaseSeeder.php              # Вызов сидеров по порядку
+├── RoleSeeder.php                  # Роли (справочник)
+├── OrderStatusSeeder.php           # Статусы заказа
+├── ShippingMethodSeeder.php        # Доставка
+├── PaymentMethodSeeder.php         # Оплата
+├── SettingSeeder.php               # Настройки магазина
+├── WarehouseSeeder.php             # Склад по умолчанию
+├── GeelyBambooCatalogSeeder.php    # Каталог из database/data/catalog_geely_bamboo.csv
+├── PageSeeder.php                  # Статические страницы
+└── BannerSeeder.php                # Баннеры
 ```
+
+Демо-категории, бренды запчастей, товары и «левые» авто из старых сидеров **убраны** — источник каталога один: CSV Geely Бамбук.
 
 **Зачем:** быстрый старт нового окружения; справочники (статусы заказа, способы доставки/оплаты) должны быть до первого заказа.
 

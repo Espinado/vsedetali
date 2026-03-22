@@ -10,11 +10,11 @@ class SettingSeeder extends Seeder
     public function run(): void
     {
         $settings = [
-            ['key' => 'store_name', 'value' => 'VSEDETALI', 'group' => 'general'],
-            ['key' => 'store_email', 'value' => 'info@vsedetali.test', 'group' => 'general'],
+            ['key' => 'store_name', 'value' => 'vsedetalki', 'group' => 'general'],
+            ['key' => 'store_email', 'value' => 'info@vsedetalki.ru', 'group' => 'general'],
             ['key' => 'store_phone', 'value' => '', 'group' => 'general'],
             ['key' => 'currency', 'value' => 'EUR', 'group' => 'general'],
-            ['key' => 'orders_notify_email', 'value' => 'orders@vsedetali.test', 'group' => 'orders'],
+            ['key' => 'orders_notify_email', 'value' => 'orders@vsedetalki.ru', 'group' => 'orders'],
         ];
 
         foreach ($settings as $item) {
