@@ -14,6 +14,12 @@ class ProductResource extends Resource
 {
     protected static ?string $model = Product::class;
 
+    protected static ?string $navigationLabel = 'Товары';
+
+    protected static ?string $modelLabel = 'Товар';
+
+    protected static ?string $pluralModelLabel = 'Товары';
+
     protected static ?string $recordTitleAttribute = 'name';
 
     protected static ?string $navigationIcon = 'heroicon-o-cube';
@@ -28,10 +34,14 @@ class ProductResource extends Resource
             ->schema([
                 Forms\Components\Select::make('category_id')
                     ->relationship('category', 'name')
-                    ->searchable(),
+                    ->searchable()
+                    ->nullable()
+                    ->label('Категория'),
                 Forms\Components\Select::make('brand_id')
                     ->relationship('brand', 'name')
-                    ->searchable(),
+                    ->searchable()
+                    ->nullable()
+                    ->label('Бренд'),
                 Forms\Components\TextInput::make('code')
                     ->label('Код')
                     ->maxLength(50)
@@ -85,9 +95,13 @@ class ProductResource extends Resource
                 Tables\Columns\TextColumn::make('cost_price')->label('Себестоимость')->money('EUR')->sortable()->toggleable(),
                 Tables\Columns\IconColumn::make('is_active')->boolean()->sortable(),
             ])
-            ->defaultSort('name')
+            ->defaultSort('id', 'desc')
             ->filters([
-                Tables\Filters\TernaryFilter::make('is_active')->label('Активен'),
+                Tables\Filters\TernaryFilter::make('is_active')
+                    ->label('Активен')
+                    ->placeholder('Все')
+                    ->trueLabel('Только активные')
+                    ->falseLabel('Только неактивные'),
             ])
             ->actions([Tables\Actions\EditAction::make()])
             ->bulkActions([
