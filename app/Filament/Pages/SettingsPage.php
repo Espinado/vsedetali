@@ -31,8 +31,9 @@ class SettingsPage extends Page implements HasForms
             'store_name' => Setting::get('store_name', config('app.name')),
             'store_email' => Setting::get('store_email', ''),
             'store_phone' => Setting::get('store_phone', ''),
-            'currency' => Setting::get('currency', 'EUR'),
+            'currency' => Setting::get('currency', 'RUB'),
             'orders_notify_email' => Setting::get('orders_notify_email', ''),
+            'site_meta_description' => Setting::get('site_meta_description', ''),
         ]);
     }
 
@@ -56,7 +57,15 @@ class SettingsPage extends Page implements HasForms
                         Forms\Components\TextInput::make('currency')
                             ->label('Валюта (код)')
                             ->maxLength(10)
-                            ->default('EUR'),
+                            ->default('RUB'),
+                    ]),
+                Forms\Components\Section::make('SEO')
+                    ->schema([
+                        Forms\Components\Textarea::make('site_meta_description')
+                            ->label('Meta description главной страницы')
+                            ->helperText('Краткое описание для поисковиков и соцсетей (до ~160 символов).')
+                            ->maxLength(500)
+                            ->rows(3),
                     ]),
                 Forms\Components\Section::make('Заказы')
                     ->schema([
@@ -75,8 +84,9 @@ class SettingsPage extends Page implements HasForms
         Setting::set('store_name', $data['store_name'] ?? '');
         Setting::set('store_email', $data['store_email'] ?? '', 'general');
         Setting::set('store_phone', $data['store_phone'] ?? '', 'general');
-        Setting::set('currency', $data['currency'] ?? 'EUR', 'general');
+        Setting::set('currency', $data['currency'] ?? 'RUB', 'general');
         Setting::set('orders_notify_email', $data['orders_notify_email'] ?? '', 'orders');
+        Setting::set('site_meta_description', $data['site_meta_description'] ?? '', 'general');
         Notification::make()->title('Настройки сохранены')->success()->send();
     }
 

@@ -46,7 +46,7 @@
                                 <p class="text-xs text-slate-500 mb-0.5">{{ $product->sku }}</p>
                                 <h3 class="font-medium text-slate-800 group-hover:text-slate-600 line-clamp-2">{{ $product->name }}</h3>
                                 <p class="mt-2 text-lg font-semibold text-slate-900">
-                                    {{ number_format($product->price, 2) }} {{ \App\Models\Setting::get('currency', 'EUR') }}
+                                    {{ number_format($product->price, 2) }} {{ \App\Models\Setting::get('currency', 'RUB') }}
                                 </p>
                                 @if($product->in_stock)
                                     <p class="mt-1 text-xs text-emerald-600">В наличии</p>

@@ -27,7 +27,7 @@
                                   style="background-color: {{ $order->payment_status_color }}20; color: {{ $order->payment_status_color }};">
                                 {{ $order->payment_status_label }}
                             </span>
-                            <span class="font-semibold text-slate-900">{{ number_format((float) $order->total, 2) }} €</span>
+                            <span class="font-semibold text-slate-900">{{ number_format((float) $order->total, 2) }} {{ \App\Models\Setting::get('currency', 'RUB') }}</span>
                         </div>
                     </a>
                 </li>

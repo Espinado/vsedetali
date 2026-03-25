@@ -2,7 +2,9 @@
 
 namespace App\Providers;
 
+use App\Broadcasting\GuestAwarePusherBroadcaster;
 use App\Models\Setting;
+use Illuminate\Broadcasting\BroadcastManager;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\View;
 use Illuminate\Support\ServiceProvider;
@@ -14,7 +16,22 @@ class AppServiceProvider extends ServiceProvider
      */
     public function register(): void
     {
-        //
+        // extend до любого boot() провайдера; каналы — в booted после Broadcast::routes() (bootstrap/app.php).
+        $this->app->booting(function (): void {
+            $manager = $this->app->make(BroadcastManager::class);
+
+            foreach (['reverb', 'pusher'] as $driver) {
+                $manager->extend($driver, function ($app, array $config) {
+                    $pusher = $app->make(BroadcastManager::class)->pusher($config);
+
+                    return new GuestAwarePusherBroadcaster($pusher, $config['jsonp'] ?? false);
+                });
+            }
+        });
+
+        $this->app->booted(function (): void {
+            require base_path('routes/broadcast_channels.php');
+        });
     }
 
     /**
@@ -27,6 +44,24 @@ class AppServiceProvider extends ServiceProvider
 
         View::composer(['layouts.storefront', 'storefront.*'], function ($view): void {
             $view->with('storeName', Setting::get('store_name', config('app.name')));
+        });
+
+        View::composer('layouts.storefront', function ($view): void {
+            $data = $view->getData();
+            if (array_key_exists('noindex', $data)) {
+                return;
+            }
+            if (request()->routeIs([
+                'login',
+                'register',
+                'cart',
+                'checkout',
+                'checkout.payment',
+                'checkout.success',
+                'account.*',
+            ])) {
+                $view->with('noindex', true);
+            }
         });
     }
 }

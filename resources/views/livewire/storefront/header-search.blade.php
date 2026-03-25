@@ -67,7 +67,7 @@
                                     </p>
                                 @endif
                                 <p class="mt-1 text-sm font-semibold text-slate-900">
-                                    {{ number_format((float) $product->price, 2) }} {{ \App\Models\Setting::get('currency', 'EUR') }}
+                                    {{ number_format((float) $product->price, 2) }} {{ \App\Models\Setting::get('currency', 'RUB') }}
                                 </p>
                             </div>
                         </a>

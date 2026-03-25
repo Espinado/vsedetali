@@ -54,6 +54,14 @@ class AdminPanelProvider extends PanelProvider
             ])
             ->authMiddleware([
                 Authenticate::class,
-            ]);
+            ])
+            ->renderHook(
+                'panels::head.start',
+                fn (): string => '<meta name="csrf-token" content="'.e(csrf_token()).'">'
+            )
+            ->renderHook(
+                'panels::body.end',
+                fn (): string => view('filament.hooks.admin-chat')->render()
+            );
     }
 }

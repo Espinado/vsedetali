@@ -32,7 +32,7 @@
                                        class="w-16 rounded border-slate-300 shadow-sm text-sm text-center">
                             </div>
                             <span class="w-24 text-right font-medium text-slate-900">
-                                {{ number_format($item->price * $item->quantity, 2) }} {{ \App\Models\Setting::get('currency', 'EUR') }}
+                                {{ number_format($item->price * $item->quantity, 2) }} {{ \App\Models\Setting::get('currency', 'RUB') }}
                             </span>
                             <button type="button"
                                     wire:click="removeItem({{ $item->id }})"
@@ -49,7 +49,7 @@
 
         <div class="mt-8 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
             <p class="text-lg font-semibold text-slate-900">
-                Итого: {{ number_format($this->subtotal, 2) }} {{ \App\Models\Setting::get('currency', 'EUR') }}
+                Итого: {{ number_format($this->subtotal, 2) }} {{ \App\Models\Setting::get('currency', 'RUB') }}
             </p>
             <a href="{{ route('checkout') }}" class="inline-block px-6 py-3 bg-slate-800 text-white rounded-lg hover:bg-slate-700 text-center font-medium">
                 Оформить заказ

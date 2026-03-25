@@ -50,7 +50,7 @@
                                             {{ $item->product->name }}
                                         </a>
                                         <p class="mt-1 text-xs text-slate-500">{{ $item->product->sku }}</p>
-                                        <p class="mt-2 text-sm font-semibold text-slate-900">{{ number_format((float) $item->total, 2) }} €</p>
+                                        <p class="mt-2 text-sm font-semibold text-slate-900">{{ number_format((float) $item->total, 2) }} {{ \App\Models\Setting::get('currency', 'RUB') }}</p>
 
                                         <div class="mt-3 flex items-center justify-between gap-3">
                                             <div class="inline-flex items-center rounded-lg border border-slate-200">
@@ -72,7 +72,7 @@
                     <div class="border-t border-slate-200 px-5 py-4">
                         <div class="mb-4 flex items-center justify-between">
                             <span class="text-sm text-slate-500">Итого</span>
-                            <span class="text-lg font-semibold text-slate-900">{{ number_format($this->subtotal, 2) }} €</span>
+                            <span class="text-lg font-semibold text-slate-900">{{ number_format($this->subtotal, 2) }} {{ \App\Models\Setting::get('currency', 'RUB') }}</span>
                         </div>
 
                         <div class="grid gap-3">

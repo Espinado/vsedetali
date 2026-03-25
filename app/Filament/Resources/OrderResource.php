@@ -61,7 +61,7 @@ class OrderResource extends Resource
                         'cancelled' => 'danger',
                         default => 'gray',
                     }),
-                Tables\Columns\TextColumn::make('total')->money('EUR')->sortable(),
+                Tables\Columns\TextColumn::make('total')->money('RUB')->sortable(),
                 Tables\Columns\TextColumn::make('created_at')->dateTime()->sortable(),
             ])
             ->defaultSort('created_at', 'desc')
@@ -99,16 +99,16 @@ class OrderResource extends Resource
                                 Infolists\Components\TextEntry::make('product_name'),
                                 Infolists\Components\TextEntry::make('sku'),
                                 Infolists\Components\TextEntry::make('quantity'),
-                                Infolists\Components\TextEntry::make('price')->money('EUR'),
-                                Infolists\Components\TextEntry::make('total')->money('EUR'),
+                                Infolists\Components\TextEntry::make('price')->money('RUB'),
+                                Infolists\Components\TextEntry::make('total')->money('RUB'),
                             ])
                             ->columns(5),
                     ]),
                 Infolists\Components\Section::make('Суммы')
                     ->schema([
-                        Infolists\Components\TextEntry::make('subtotal')->label('Товары')->money('EUR'),
-                        Infolists\Components\TextEntry::make('shipping_cost')->label('Доставка')->money('EUR'),
-                        Infolists\Components\TextEntry::make('total')->label('Итого')->money('EUR')->weight('bold'),
+                        Infolists\Components\TextEntry::make('subtotal')->label('Товары')->money('RUB'),
+                        Infolists\Components\TextEntry::make('shipping_cost')->label('Доставка')->money('RUB'),
+                        Infolists\Components\TextEntry::make('total')->label('Итого')->money('RUB')->weight('bold'),
                     ])
                     ->columns(3),
                 Infolists\Components\Section::make('Доставка и оплата')

@@ -518,7 +518,7 @@
 | id | bigInteger unsigned | NO | — | PK, AI | — | **Будущее** |
 | company_id | bigInteger unsigned | NO | — | FK → companies, index | — | |
 | name | string(255) | NO | — | — | — | |
-| currency | string(3) | NO | 'EUR' | — | — | |
+| currency | string(3) | NO | 'RUB' | — | — | |
 | type | enum('retail','wholesale') | NO | 'retail' | index | — | |
 | is_default | boolean | NO | false | — | — | |
 | created_at | timestamp | YES | null | — | — | |

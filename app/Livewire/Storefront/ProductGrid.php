@@ -5,7 +5,9 @@ namespace App\Livewire\Storefront;
 use App\Models\Brand;
 use App\Models\Category;
 use App\Models\Product;
+use App\Models\Setting;
 use App\Models\Vehicle;
+use App\Support\Seo;
 use Illuminate\Database\Eloquent\Builder;
 use Livewire\Component;
 use Livewire\WithPagination;
@@ -374,10 +376,37 @@ class ProductGrid extends Component
 
     public function render()
     {
+        $category = $this->category;
+        $storeName = Setting::get('store_name', config('app.name'));
+
+        $titleSegment = $category
+            ? ($category->meta_title ?: $category->name.' — Каталог')
+            : 'Каталог';
+
+        if ($category?->meta_description) {
+            $metaDescription = Seo::metaDescription($category->meta_description);
+        } elseif ($category) {
+            $metaDescription = Seo::metaDescription(
+                $category->description,
+                'Каталог «'.$category->name.'» в интернет-магазине '.$storeName.'.',
+            );
+        } else {
+            $metaDescription = Setting::get(
+                'site_meta_description',
+                'Каталог автозапчастей — '.$storeName.'.',
+            );
+        }
+
+        $canonicalUrl = $this->categorySlug
+            ? route('catalog', ['categorySlug' => $this->categorySlug])
+            : route('catalog');
+
         return view('livewire.storefront.product-grid', [
             'products' => $this->products,
         ])->layout('layouts.storefront', [
-            'title' => $this->category ? $this->category->name . ' — Каталог' : 'Каталог',
+            'title' => $titleSegment,
+            'metaDescription' => $metaDescription,
+            'canonicalUrl' => $canonicalUrl,
         ]);
     }
 }

@@ -90,7 +90,7 @@ class StockResource extends Resource
                     ->sortable(query: fn ($query, string $direction) => $query->orderByRaw('(quantity - reserved_quantity) ' . $direction)),
                 Tables\Columns\TextColumn::make('product.cost_price')
                     ->label('Себестоимость')
-                    ->money('EUR')
+                    ->money('RUB')
                     ->toggleable(),
                 Tables\Columns\TextColumn::make('cost_total')
                     ->label('Сумма себестоимости')
@@ -98,7 +98,7 @@ class StockResource extends Resource
                     ->toggleable(),
                 Tables\Columns\TextColumn::make('product.price')
                     ->label('Продажная цена')
-                    ->money('EUR')
+                    ->money('RUB')
                     ->toggleable(),
                 Tables\Columns\TextColumn::make('sale_total')
                     ->label('Сумма продажи')

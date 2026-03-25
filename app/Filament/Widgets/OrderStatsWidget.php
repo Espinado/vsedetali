@@ -21,7 +21,7 @@ class OrderStatsWidget extends BaseWidget
         return [
             Stat::make('Всего заказов', number_format($totalOrders, 0, ',', ' ')),
             Stat::make('Заказов сегодня', number_format($ordersToday, 0, ',', ' ')),
-            Stat::make('Выручка за месяц', number_format($revenueMonth, 2, ',', ' ') . ' ' . \App\Models\Setting::get('currency', 'EUR')),
+            Stat::make('Выручка за месяц', number_format($revenueMonth, 2, ',', ' ') . ' ' . \App\Models\Setting::get('currency', 'RUB')),
         ];
     }
 }

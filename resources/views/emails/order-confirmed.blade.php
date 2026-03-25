@@ -32,16 +32,16 @@
                 <tr>
                     <td>{{ $item->product_name }} @if($item->sku)<span class="muted">({{ $item->sku }})</span>@endif</td>
                     <td>{{ $item->quantity }}</td>
-                    <td>{{ number_format((float) $item->price, 2) }} €</td>
-                    <td>{{ number_format((float) $item->total, 2) }} €</td>
+                    <td>{{ number_format((float) $item->price, 2) }} {{ \App\Models\Setting::get('currency', 'RUB') }}</td>
+                    <td>{{ number_format((float) $item->total, 2) }} {{ \App\Models\Setting::get('currency', 'RUB') }}</td>
                 </tr>
             @endforeach
         </tbody>
     </table>
 
-    <p><strong>Товары:</strong> {{ number_format((float) $order->subtotal, 2) }} €</p>
-    <p><strong>Доставка:</strong> {{ number_format((float) $order->shipping_cost, 2) }} € ({{ $order->shippingMethod->name ?? '—' }})</p>
-    <p class="total">Итого к оплате: {{ number_format((float) $order->total, 2) }} €</p>
+    <p><strong>Товары:</strong> {{ number_format((float) $order->subtotal, 2) }} {{ \App\Models\Setting::get('currency', 'RUB') }}</p>
+    <p><strong>Доставка:</strong> {{ number_format((float) $order->shipping_cost, 2) }} {{ \App\Models\Setting::get('currency', 'RUB') }} ({{ $order->shippingMethod->name ?? '—' }})</p>
+    <p class="total">Итого к оплате: {{ number_format((float) $order->total, 2) }} {{ \App\Models\Setting::get('currency', 'RUB') }}</p>
     <p><strong>Способ оплаты:</strong> {{ $order->paymentMethod->name ?? '—' }}</p>
 
     @php $addr = $order->shippingAddress(); @endphp

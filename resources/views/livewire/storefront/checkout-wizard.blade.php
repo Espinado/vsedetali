@@ -132,15 +132,15 @@
                     <dl class="space-y-2 text-sm">
                         <div class="flex justify-between">
                             <dt>Товары</dt>
-                            <dd>{{ number_format($this->subtotal, 2) }} €</dd>
+                            <dd>{{ number_format($this->subtotal, 2) }} {{ \App\Models\Setting::get('currency', 'RUB') }}</dd>
                         </div>
                         <div class="flex justify-between">
                             <dt>Доставка</dt>
-                            <dd>{{ number_format($this->shippingCost, 2) }} €</dd>
+                            <dd>{{ number_format($this->shippingCost, 2) }} {{ \App\Models\Setting::get('currency', 'RUB') }}</dd>
                         </div>
                         <div class="flex justify-between text-base font-semibold pt-2 border-t">
                             <dt>К оплате</dt>
-                            <dd>{{ number_format($this->total, 2) }} €</dd>
+                            <dd>{{ number_format($this->total, 2) }} {{ \App\Models\Setting::get('currency', 'RUB') }}</dd>
                         </div>
                     </dl>
                 </div>
@@ -150,7 +150,7 @@
                         @foreach ($this->cart->cartItems as $item)
                             <li class="py-2 flex justify-between text-sm">
                                 <span>{{ $item->product->name }} × {{ $item->quantity }}</span>
-                                <span>{{ number_format($item->price * $item->quantity, 2) }} €</span>
+                                <span>{{ number_format($item->price * $item->quantity, 2) }} {{ \App\Models\Setting::get('currency', 'RUB') }}</span>
                             </li>
                         @endforeach
                     </ul>

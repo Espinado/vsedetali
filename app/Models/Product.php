@@ -21,6 +21,8 @@ class Product extends Model
         'slug',
         'description',
         'short_description',
+        'meta_title',
+        'meta_description',
         'weight',
         'price',
         'cost_price',

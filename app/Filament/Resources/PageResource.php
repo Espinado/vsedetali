@@ -42,6 +42,18 @@ class PageResource extends Resource
                     ->maxLength(255)
                     ->unique(ignoreRecord: true)
                     ->helperText('Адрес на сайте: /page/{slug}. Для контактов оставьте contacts.'),
+                Forms\Components\Section::make('SEO')
+                    ->schema([
+                        Forms\Components\TextInput::make('meta_title')
+                            ->label('Meta title')
+                            ->maxLength(255),
+                        Forms\Components\Textarea::make('meta_description')
+                            ->label('Meta description')
+                            ->maxLength(500)
+                            ->rows(2),
+                    ])
+                    ->collapsed()
+                    ->collapsible(),
                 Forms\Components\Section::make('Контакты')
                     ->description('На витрине используется только для страницы со slug «contacts» (/page/contacts). Для «Доставка» / «Оплата» можно не заполнять.')
                     ->schema([

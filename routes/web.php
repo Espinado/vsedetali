@@ -2,12 +2,24 @@
 
 use App\Http\Controllers\AuthController;
 use App\Http\Controllers\ProductController;
+use App\Http\Controllers\SitemapController;
 use App\Livewire\Storefront\ProductGrid;
 use App\Models\Banner;
 use App\Models\Order;
 use App\Models\Page;
 use App\Models\Product;
+use App\Models\Setting;
+use App\Support\Seo;
 use Illuminate\Support\Facades\Route;
+
+// GET в адресной строке не передаёт socket_id/channel_name — Laravel отдаёт 403. Реальный запрос — только POST из Echo.
+if (config('app.debug')) {
+    Route::get('/broadcasting/auth', function () {
+        return response()->json([
+            'message' => 'Служебный URL для POST из Laravel Echo (поля socket_id, channel_name). Открытие в браузере (GET) не поддерживается.',
+        ], 400);
+    });
+}
 
 // Auth (guest)
 Route::middleware('guest')->group(function () {
@@ -18,11 +30,39 @@ Route::middleware('guest')->group(function () {
 });
 Route::post('/logout', [AuthController::class, 'logout'])->name('logout')->middleware('auth');
 
+Route::get('/sitemap.xml', SitemapController::class)->name('sitemap');
+Route::get('/robots.txt', function () {
+    $sitemap = url('/sitemap.xml');
+    $body = implode("\n", [
+        'User-agent: *',
+        'Allow: /',
+        'Disallow: /account/',
+        'Disallow: /cart',
+        'Disallow: /checkout',
+        'Disallow: /login',
+        'Disallow: /register',
+        '',
+        'Sitemap: '.$sitemap,
+    ]);
+
+    return response($body, 200, ['Content-Type' => 'text/plain; charset=UTF-8']);
+})->name('robots');
+
 // Storefront
 Route::get('/', function () {
     $banners = Banner::active()->get();
     $featuredProducts = Product::with(['category', 'brand', 'images', 'stocks'])->active()->latest()->take(8)->get();
-    return view('storefront.home', ['banners' => $banners, 'featuredProducts' => $featuredProducts]);
+    $metaDescription = trim((string) (Setting::get('site_meta_description') ?? ''));
+    if ($metaDescription === '') {
+        $metaDescription = 'Интернет-магазин автозапчастей. Каталог, доставка, удобная оплата.';
+    }
+
+    return view('storefront.home', [
+        'banners' => $banners,
+        'featuredProducts' => $featuredProducts,
+        'metaDescription' => $metaDescription,
+        'canonicalUrl' => url('/'),
+    ]);
 })->name('home');
 Route::get('/catalog/{categorySlug?}', ProductGrid::class)->name('catalog');
 Route::get('/product/{product:slug}', [ProductController::class, 'show'])->name('product.show');
@@ -43,7 +83,13 @@ Route::get('/checkout/success/{order}', function (Order $order) {
 })->name('checkout.success')->middleware('auth');
 Route::get('/page/{slug}', function (string $slug) {
     $page = Page::where('slug', $slug)->active()->firstOrFail();
-    return view('storefront.page', ['page' => $page]);
+    $metaDescription = Seo::metaDescription($page->meta_description, $page->body);
+
+    return view('storefront.page', [
+        'page' => $page,
+        'metaDescription' => $metaDescription,
+        'canonicalUrl' => route('page.show', ['slug' => $page->slug]),
+    ]);
 })->name('page.show');
 
 // Account (auth required)

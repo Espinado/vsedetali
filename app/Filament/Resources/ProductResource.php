@@ -61,6 +61,18 @@ class ProductResource extends Resource
                     ->columnSpanFull(),
                 Forms\Components\RichEditor::make('description')
                     ->columnSpanFull(),
+                Forms\Components\Section::make('SEO')
+                    ->schema([
+                        Forms\Components\TextInput::make('meta_title')
+                            ->label('Meta title')
+                            ->maxLength(255),
+                        Forms\Components\Textarea::make('meta_description')
+                            ->label('Meta description')
+                            ->maxLength(500)
+                            ->rows(2),
+                    ])
+                    ->collapsed()
+                    ->collapsible(),
                 Forms\Components\TextInput::make('weight')
                     ->numeric()
                     ->nullable(),
@@ -68,12 +80,12 @@ class ProductResource extends Resource
                     ->label('Продажная цена')
                     ->required()
                     ->numeric()
-                    ->prefix('€'),
+                    ->prefix('₽'),
                 Forms\Components\TextInput::make('cost_price')
                     ->label('Себестоимость')
                     ->numeric()
                     ->nullable()
-                    ->prefix('€'),
+                    ->prefix('₽'),
                 Forms\Components\TextInput::make('vat_rate')
                     ->numeric()
                     ->nullable(),
@@ -91,8 +103,8 @@ class ProductResource extends Resource
                 Tables\Columns\TextColumn::make('name')->label('Наименование')->searchable()->sortable(),
                 Tables\Columns\TextColumn::make('category.name')->label('Категория')->sortable(),
                 Tables\Columns\TextColumn::make('brand.name')->label('Бренд')->sortable(),
-                Tables\Columns\TextColumn::make('price')->label('Продажная цена')->money('EUR')->sortable(),
-                Tables\Columns\TextColumn::make('cost_price')->label('Себестоимость')->money('EUR')->sortable()->toggleable(),
+                Tables\Columns\TextColumn::make('price')->label('Продажная цена')->money('RUB')->sortable(),
+                Tables\Columns\TextColumn::make('cost_price')->label('Себестоимость')->money('RUB')->sortable()->toggleable(),
                 Tables\Columns\IconColumn::make('is_active')->boolean()->sortable(),
             ])
             ->defaultSort('id', 'desc')

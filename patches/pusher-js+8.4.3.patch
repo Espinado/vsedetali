@@ -1,0 +1,22 @@
+diff --git a/node_modules/pusher-js/dist/web/pusher.js b/node_modules/pusher-js/dist/web/pusher.js
+index 5cf9ef0..ea18d87 100644
+--- a/node_modules/pusher-js/dist/web/pusher.js
++++ b/node_modules/pusher-js/dist/web/pusher.js
+@@ -4159,11 +4159,14 @@ function getWebsocketHostFromCluster(cluster) {
+     return `ws-${cluster}.pusher.com`;
+ }
+ function shouldUseTLS(opts) {
+-    if (runtime.getProtocol() === 'https:') {
++    if (opts.forceTLS === false) {
++        return false;
++    }
++    if (opts.forceTLS === true) {
+         return true;
+     }
+-    else if (opts.forceTLS === false) {
+-        return false;
++    if (runtime.getProtocol() === 'https:') {
++        return true;
+     }
+     return true;
+ }

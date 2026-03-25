@@ -68,8 +68,8 @@
                             @endif
                         </td>
                         <td class="px-4 py-3 text-right">{{ $item->quantity }}</td>
-                        <td class="px-4 py-3 text-right">{{ number_format((float) $item->price, 2) }} €</td>
-                        <td class="px-4 py-3 text-right">{{ number_format((float) $item->total, 2) }} €</td>
+                        <td class="px-4 py-3 text-right">{{ number_format((float) $item->price, 2) }} {{ \App\Models\Setting::get('currency', 'RUB') }}</td>
+                        <td class="px-4 py-3 text-right">{{ number_format((float) $item->total, 2) }} {{ \App\Models\Setting::get('currency', 'RUB') }}</td>
                     </tr>
                 @endforeach
             </tbody>
@@ -77,15 +77,15 @@
         <div class="p-4 border-t border-slate-200 bg-slate-50 space-y-1 text-sm">
             <div class="flex justify-between">
                 <span class="text-slate-600">Товары</span>
-                <span>{{ number_format((float) $order->subtotal, 2) }} €</span>
+                <span>{{ number_format((float) $order->subtotal, 2) }} {{ \App\Models\Setting::get('currency', 'RUB') }}</span>
             </div>
             <div class="flex justify-between">
                 <span class="text-slate-600">Доставка</span>
-                <span>{{ number_format((float) $order->shipping_cost, 2) }} €</span>
+                <span>{{ number_format((float) $order->shipping_cost, 2) }} {{ \App\Models\Setting::get('currency', 'RUB') }}</span>
             </div>
             <div class="flex justify-between font-semibold text-base pt-2">
                 <span>Итого</span>
-                <span>{{ number_format((float) $order->total, 2) }} €</span>
+                <span>{{ number_format((float) $order->total, 2) }} {{ \App\Models\Setting::get('currency', 'RUB') }}</span>
             </div>
         </div>
     </div>

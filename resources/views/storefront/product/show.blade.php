@@ -1,6 +1,14 @@
 @extends('layouts.storefront')
 
-@section('title', $product->name)
+@section('title', $product->meta_title ?: $product->name)
+
+@push('head')
+    @isset($productJsonLd)
+        <script type="application/ld+json">
+            {!! json_encode($productJsonLd, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) !!}
+        </script>
+    @endisset
+@endpush
 
 @section('content')
     <nav class="text-sm text-slate-500 mb-6">
@@ -46,7 +54,7 @@
             <p class="text-slate-600 mb-4">Артикул: <span class="font-mono">{{ $product->sku }}</span></p>
 
             <p class="text-2xl font-semibold text-slate-900 mb-2">
-                {{ number_format($product->price, 2) }} {{ \App\Models\Setting::get('currency', 'EUR') }}
+                {{ number_format($product->price, 2) }} {{ \App\Models\Setting::get('currency', 'RUB') }}
             </p>
             <p class="mb-6">
                 @if($product->in_stock)

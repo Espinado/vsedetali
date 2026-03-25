@@ -38,7 +38,7 @@
                                   style="background-color: {{ $order->status->color ?? '#e2e8f0' }}30; color: {{ $order->status->color ?? '#64748b' }};">
                                 {{ $order->status->name }}
                             </span>
-                            <span class="font-semibold text-slate-900">{{ number_format((float) $order->total, 2) }} €</span>
+                            <span class="font-semibold text-slate-900">{{ number_format((float) $order->total, 2) }} {{ \App\Models\Setting::get('currency', 'RUB') }}</span>
                         </a>
                     </li>
                 @endforeach

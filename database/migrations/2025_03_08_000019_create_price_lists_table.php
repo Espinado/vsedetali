@@ -12,7 +12,7 @@ return new class extends Migration
             $table->id();
             $table->foreignId('company_id')->constrained()->cascadeOnDelete();
             $table->string('name');
-            $table->string('currency', 3)->default('EUR');
+            $table->string('currency', 3)->default('RUB');
             $table->string('type', 20)->default('retail')->index(); // retail, wholesale
             $table->boolean('is_default')->default(false);
             $table->timestamps();

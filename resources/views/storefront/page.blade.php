@@ -1,6 +1,6 @@
 @extends('layouts.storefront')
 
-@section('title', $page->title)
+@section('title', $page->meta_title ?: $page->title)
 
 @section('content')
     @php

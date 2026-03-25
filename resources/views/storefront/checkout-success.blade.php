@@ -25,7 +25,7 @@
             </div>
             <div class="mt-2 flex justify-between gap-4">
                 <span class="text-slate-500">Сумма</span>
-                <span class="font-medium text-slate-900">{{ number_format((float) $order->total, 2) }} €</span>
+                <span class="font-medium text-slate-900">{{ number_format((float) $order->total, 2) }} {{ \App\Models\Setting::get('currency', 'RUB') }}</span>
             </div>
             <div class="mt-2 flex justify-between gap-4">
                 <span class="text-slate-500">Статус оплаты</span>

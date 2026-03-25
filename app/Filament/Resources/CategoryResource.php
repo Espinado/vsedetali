@@ -39,6 +39,21 @@ class CategoryResource extends Resource
                     ->nullable(),
                 Forms\Components\Textarea::make('description')
                     ->columnSpanFull(),
+                Forms\Components\Section::make('SEO')
+                    ->schema([
+                        Forms\Components\TextInput::make('meta_title')
+                            ->label('Meta title')
+                            ->maxLength(255),
+                        Forms\Components\Textarea::make('meta_description')
+                            ->label('Meta description')
+                            ->maxLength(500)
+                            ->rows(2),
+                        Forms\Components\TextInput::make('meta_keywords')
+                            ->label('Meta keywords')
+                            ->maxLength(500),
+                    ])
+                    ->collapsed()
+                    ->collapsible(),
                 Forms\Components\TextInput::make('sort')
                     ->numeric()
                     ->default(0),

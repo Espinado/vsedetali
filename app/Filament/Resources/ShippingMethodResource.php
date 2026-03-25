@@ -26,8 +26,8 @@ class ShippingMethodResource extends Resource
             ->schema([
                 Forms\Components\TextInput::make('name')->required()->maxLength(255),
                 Forms\Components\Textarea::make('description')->maxLength(500)->columnSpanFull(),
-                Forms\Components\TextInput::make('cost')->numeric()->required()->prefix('€')->default(0),
-                Forms\Components\TextInput::make('free_from')->numeric()->nullable()->prefix('€')->label('Бесплатно от'),
+                Forms\Components\TextInput::make('cost')->numeric()->required()->prefix('₽')->default(0),
+                Forms\Components\TextInput::make('free_from')->numeric()->nullable()->prefix('₽')->label('Бесплатно от'),
                 Forms\Components\TextInput::make('sort')->numeric()->default(0),
                 Forms\Components\Toggle::make('is_active')->default(true),
             ]);
@@ -38,8 +38,8 @@ class ShippingMethodResource extends Resource
         return $table
             ->columns([
                 Tables\Columns\TextColumn::make('name')->searchable()->sortable(),
-                Tables\Columns\TextColumn::make('cost')->money('EUR')->sortable(),
-                Tables\Columns\TextColumn::make('free_from')->money('EUR')->sortable()->placeholder('—'),
+                Tables\Columns\TextColumn::make('cost')->money('RUB')->sortable(),
+                Tables\Columns\TextColumn::make('free_from')->money('RUB')->sortable()->placeholder('—'),
                 Tables\Columns\TextColumn::make('sort')->sortable(),
                 Tables\Columns\IconColumn::make('is_active')->boolean()->sortable(),
             ])

@@ -10,8 +10,13 @@ return Application::configure(basePath: dirname(__DIR__))
         commands: __DIR__.'/../routes/console.php',
         health: '/up',
     )
+    ->withBroadcasting(
+        __DIR__.'/../routes/channels.php',
+        ['middleware' => ['web']],
+    )
     ->withMiddleware(function (Middleware $middleware): void {
-        //
+        // Laragon / nginx за HTTPS: корректный Request::secure() и сессия для /broadcasting/auth
+        $middleware->trustProxies(at: '*');
     })
     ->withExceptions(function (Exceptions $exceptions): void {
         //
