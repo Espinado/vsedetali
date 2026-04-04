@@ -16,6 +16,19 @@ class AppServiceProvider extends ServiceProvider
      */
     public function register(): void
     {
+        // Reverb StartServer использует SIGINT/SIGTERM/SIGTSTP; без ext-pcntl на shared hosting константы не заданы.
+        if (! extension_loaded('pcntl')) {
+            foreach ([
+                'SIGINT' => 2,
+                'SIGTERM' => 15,
+                'SIGTSTP' => 20,
+            ] as $name => $value) {
+                if (! defined($name)) {
+                    define($name, $value);
+                }
+            }
+        }
+
         // extend до любого boot() провайдера; каналы — в booted после Broadcast::routes() (bootstrap/app.php).
         $this->app->booting(function (): void {
             $manager = $this->app->make(BroadcastManager::class);

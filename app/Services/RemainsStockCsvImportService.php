@@ -24,8 +24,6 @@ class RemainsStockCsvImportService
     /** @var array{standalone: bool, part_brand_id: ?int, vehicles: list<array{make: string, model: ?string}>} */
     private array $context;
 
-    private string $csvDelimiter = ',';
-
     /**
      * @return array{
      *   rows: int,
@@ -76,288 +74,136 @@ class RemainsStockCsvImportService
             }
         }
 
-        [$handle, $this->csvDelimiter, $normalizedContent] = $this->openNormalizedCsvStream($absolutePath);
+        foreach (RemainsStockCsvReader::iterateDataRows($absolutePath) as $row) {
+            $stats['rows']++;
 
-        $this->seekStreamAfterHeaderRow($handle, $normalizedContent, $this->csvDelimiter);
+            $row = array_pad($row, 16, '');
 
-        try {
-            while (($row = $this->fgetcsvRow($handle)) !== false) {
-                $stats['rows']++;
+            $code = $row[1] ?? '';
+            $skuRaw = $row[2] ?? '';
+            $name = $row[3] ?? '';
 
-                $row = array_map(fn ($c) => $this->normalizeUtf8String(trim((string) ($c ?? ''), " \t\n\r\0\x0B\xEF\xBB\xBF")), $row);
-                $row = array_pad($row, 16, '');
+            if ($this->isSectionHeaderRow($skuRaw, $name, $code)) {
+                $this->context = $this->parseSectionLabel($code, $dryRun);
 
-                $code = $row[1] ?? '';
-                $skuRaw = $row[2] ?? '';
-                $name = $row[3] ?? '';
+                continue;
+            }
 
-                if ($this->isSectionHeaderRow($skuRaw, $name, $code)) {
-                    $this->context = $this->parseSectionLabel($code, $dryRun);
+            if ($skuRaw === '' || $name === '') {
+                $stats['skipped']++;
 
-                    continue;
-                }
+                continue;
+            }
 
-                if ($skuRaw === '' || $name === '') {
-                    $stats['skipped']++;
+            $sku = mb_strlen($skuRaw) <= 100
+                ? $skuRaw
+                : (mb_substr($skuRaw, 0, 90).'_'.substr(md5($skuRaw), 0, 8));
 
-                    continue;
-                }
+            $available = (int) round($this->parseDecimal($row[5] ?? '0') ?? 0);
+            $reserved = (int) round($this->parseDecimal($row[6] ?? '0') ?? 0);
+            $costPrice = $this->parseDecimal($row[9] ?? null);
+            $salePrice = $this->parseDecimal($row[11] ?? null);
+            $days = isset($row[13]) && $row[13] !== ''
+                ? (int) round($this->parseDecimal($row[13]) ?? 0)
+                : null;
 
-                $sku = mb_strlen($skuRaw) <= 100
-                    ? $skuRaw
-                    : (mb_substr($skuRaw, 0, 90).'_'.substr(md5($skuRaw), 0, 8));
-
-                $available = (int) round($this->parseDecimal($row[5] ?? '0') ?? 0);
-                $reserved = (int) round($this->parseDecimal($row[6] ?? '0') ?? 0);
-                $costPrice = $this->parseDecimal($row[9] ?? null);
-                $salePrice = $this->parseDecimal($row[11] ?? null);
-                $days = isset($row[13]) && $row[13] !== ''
-                    ? (int) round($this->parseDecimal($row[13]) ?? 0)
-                    : null;
-
-                if ($dryRun) {
-                    if (Product::query()->where('sku', $sku)->exists()) {
-                        $stats['skipped_existing']++;
-                    } else {
-                        $stats['imported']++;
-                    }
-
-                    continue;
-                }
-
-                DB::transaction(function () use (
-                    &$stats,
-                    $warehouse,
-                    $sku,
-                    $code,
-                    $name,
-                    $available,
-                    $reserved,
-                    $costPrice,
-                    $salePrice,
-                    $days
-                ) {
-                    if (Product::query()->where('sku', $sku)->exists()) {
-                        $stats['skipped_existing']++;
-
-                        return;
-                    }
-
-                    $product = new Product;
-                    $product->sku = $sku;
-                    $product->slug = $this->uniqueProductSlug($sku);
-                    $product->category_id = null;
-                    $product->is_active = true;
-                    $product->type = 'part';
-                    $product->code = $code !== '' ? Str::limit($code, 50, '') : null;
-                    $product->name = Str::limit($name, 500, '');
-                    if ($costPrice !== null) {
-                        $product->cost_price = $costPrice;
-                    }
-                    if ($salePrice !== null) {
-                        $product->price = $salePrice;
-                    }
-
-                    if ($this->context['standalone']) {
-                        $product->brand_id = null;
-                    } elseif ($this->context['part_brand_id'] !== null) {
-                        $product->brand_id = $this->context['part_brand_id'];
-                    } else {
-                        $product->brand_id = null;
-                    }
-
-                    $product->save();
-                    $stats['created_products']++;
+            if ($dryRun) {
+                if (Product::query()->where('sku', $sku)->exists()) {
+                    $stats['skipped_existing']++;
+                } else {
                     $stats['imported']++;
+                }
 
-                    foreach ($this->context['vehicles'] as $vm) {
-                        $modelVal = $vm['model'] ?? '';
-                        $vehicle = Vehicle::query()->firstOrCreate(
-                            [
-                                'make' => $vm['make'],
-                                'model' => $modelVal !== '' ? $modelVal : '',
-                                'generation' => null,
-                            ],
-                            [
-                                'year_from' => null,
-                                'year_to' => null,
-                                'engine' => null,
-                                'body_type' => null,
-                            ]
-                        );
+                continue;
+            }
 
-                        if ($vehicle->wasRecentlyCreated) {
-                            $stats['created_vehicles']++;
-                        }
+            DB::transaction(function () use (
+                &$stats,
+                $warehouse,
+                $sku,
+                $code,
+                $name,
+                $available,
+                $reserved,
+                $costPrice,
+                $salePrice,
+                $days
+            ) {
+                if (Product::query()->where('sku', $sku)->exists()) {
+                    $stats['skipped_existing']++;
 
-                        $oem = Str::limit(explode('/', $sku)[0], 100, '');
-                        if (! $product->vehicles()->where('vehicles.id', $vehicle->id)->exists()) {
-                            $product->vehicles()->attach($vehicle->id, ['oem_number' => $oem ?: null]);
-                            $stats['attached_vehicles']++;
-                        }
-                    }
+                    return;
+                }
 
-                    Stock::query()->updateOrCreate(
+                $product = new Product;
+                $product->sku = $sku;
+                $product->slug = $this->uniqueProductSlug($sku);
+                $product->category_id = null;
+                $product->is_active = true;
+                $product->type = 'part';
+                $product->code = $code !== '' ? Str::limit($code, 50, '') : null;
+                $product->name = Str::limit($name, 500, '');
+                if ($costPrice !== null) {
+                    $product->cost_price = $costPrice;
+                }
+                if ($salePrice !== null) {
+                    $product->price = $salePrice;
+                }
+
+                if ($this->context['standalone']) {
+                    $product->brand_id = null;
+                } elseif ($this->context['part_brand_id'] !== null) {
+                    $product->brand_id = $this->context['part_brand_id'];
+                } else {
+                    $product->brand_id = null;
+                }
+
+                $product->save();
+                $stats['created_products']++;
+                $stats['imported']++;
+
+                foreach ($this->context['vehicles'] as $vm) {
+                    $modelVal = $vm['model'] ?? '';
+                    $vehicle = Vehicle::query()->firstOrCreate(
                         [
-                            'product_id' => $product->id,
-                            'warehouse_id' => $warehouse->id,
+                            'make' => $vm['make'],
+                            'model' => $modelVal !== '' ? $modelVal : '',
+                            'generation' => null,
                         ],
                         [
-                            'quantity' => max(0, $available),
-                            'reserved_quantity' => max(0, $reserved),
-                            'days_in_warehouse' => $days,
+                            'year_from' => null,
+                            'year_to' => null,
+                            'engine' => null,
+                            'body_type' => null,
                         ]
                     );
-                });
-            }
-        } finally {
-            fclose($handle);
+
+                    if ($vehicle->wasRecentlyCreated) {
+                        $stats['created_vehicles']++;
+                    }
+
+                    $oem = Str::limit(explode('/', $sku)[0], 100, '');
+                    if (! $product->vehicles()->where('vehicles.id', $vehicle->id)->exists()) {
+                        $product->vehicles()->attach($vehicle->id, ['oem_number' => $oem ?: null]);
+                        $stats['attached_vehicles']++;
+                    }
+                }
+
+                Stock::query()->updateOrCreate(
+                    [
+                        'product_id' => $product->id,
+                        'warehouse_id' => $warehouse->id,
+                    ],
+                    [
+                        'quantity' => max(0, $available),
+                        'reserved_quantity' => max(0, $reserved),
+                        'days_in_warehouse' => $days,
+                    ]
+                );
+            });
         }
 
         return $stats;
-    }
-
-    /**
-     * Читает строку CSV с разделителем по умолчанию для текущей версии PHP (escape в PHP 8.4+ = «», в 8.3− = «\»).
-     *
-     * @return array<int, string|null>|false
-     */
-    private function fgetcsvRow($handle): array|false
-    {
-        // Без 5-го аргумента: в PHP 8.4+ по умолчанию escape = «», в 8.3− = «\» — так корректно разбираются кавычки.
-        return fgetcsv($handle, 0, $this->csvDelimiter, '"');
-    }
-
-    /**
-     * Позиционирует поток на байт сразу после строки заголовка (по подстроке «,Код,Артикул,»).
-     *
-     * Проверку заголовка делаем по маркеру и regex (не по str_getcsv с фиксированным escape): в PHP 8.4+
-     * разбор кавычек отличается от 8.3, плюс в файле часто лишняя запятая в начале строки.
-     */
-    private function seekStreamAfterHeaderRow($handle, string $content, string $delimiter): void
-    {
-        $markers = [',Код,Артикул,', ';Код;Артикул;'];
-        $pos = false;
-        $matchedMarker = null;
-        foreach ($markers as $m) {
-            $pos = strpos($content, $m);
-            if ($pos !== false) {
-                $matchedMarker = $m;
-
-                break;
-            }
-        }
-
-        if ($pos === false || $matchedMarker === null) {
-            throw new \RuntimeException(
-                'В тексте файла не найдена подстрока «,Код,Артикул,» (или с «;»). Сохраните CSV в UTF-8 и одну строку заголовка.'
-            );
-        }
-
-        $lineStart = strrpos(substr($content, 0, $pos), "\n");
-        $lineStart = $lineStart === false ? 0 : $lineStart + 1;
-        $lineEnd = strpos($content, "\n", $lineStart);
-        $headerLine = $lineEnd === false
-            ? substr($content, $lineStart)
-            : substr($content, $lineStart, $lineEnd - $lineStart);
-
-        if (! str_contains($headerLine, $matchedMarker)) {
-            throw new \RuntimeException(
-                'Строка заголовка обрезана неверно. Начало: '.Str::limit($headerLine, 240)
-            );
-        }
-
-        // Дополнительно: в этой строке «Код» и «Артикул» идут подряд как колонки (на случай ложного совпадения в тексте).
-        if (! $this->headerLineLooksLikeDataTable($headerLine, $delimiter)) {
-            throw new \RuntimeException(
-                'Строка с «Код»/«Артикул» не похожа на заголовок таблицы. Начало строки: '.Str::limit($headerLine, 240)
-            );
-        }
-
-        $nextOffset = $lineEnd === false ? strlen($content) : $lineEnd + 1;
-        rewind($handle);
-        fseek($handle, $nextOffset);
-    }
-
-    /**
-     * Проверка без str_getcsv: в 1С/Excel в начале строки часто лишняя «,», а кавычки в заголовке
-     * по-разному разбираются с escape в разных версиях PHP.
-     */
-    private function headerLineLooksLikeDataTable(string $headerLine, string $delimiter): bool
-    {
-        if ($delimiter === ',') {
-            return (bool) preg_match('/(?:^|,)\s*Код\s*,\s*Артикул\s*(?:,|$)/u', $headerLine);
-        }
-
-        return (bool) preg_match('/(?:^|;)\s*Код\s*;\s*Артикул\s*(?:;|$)/u', $headerLine);
-    }
-
-    /**
-     * Читает файл в память и нормализует типичные проблемы Excel/1С:
-     * - UTF-8 BOM;
-     * - «умные» кавычки вместо ASCII " (иначе str_getcsv ломает колонки);
-     * - перенос строки внутри заголовка в поле «Сумма / себестоимости»;
-     * - разделитель «,» или «;».
-     *
-     * @return array{0: resource, 1: string, 2: string}
-     */
-    private function openNormalizedCsvStream(string $absolutePath): array
-    {
-        $content = file_get_contents($absolutePath);
-        if ($content === false) {
-            throw new \RuntimeException('Не удалось прочитать файл.');
-        }
-
-        if (str_starts_with($content, "\xEF\xBB\xBF")) {
-            $content = substr($content, 3);
-        }
-
-        // Единый перевод строки — иначе склейка ломается
-        $content = str_replace(["\r\n", "\r"], "\n", $content);
-
-        // Не конвертируем «как CP1251» в UTF-8: при уже корректном UTF-8 это портит «Код»/«Артикул».
-
-        // Типографские кавычки → ASCII " (иначе fgetcsv не распознаёт поля)
-        $content = str_replace(
-            ["\xE2\x80\x9C", "\xE2\x80\x9D", "\xE2\x80\x9E", "\xC2\xAB", "\xC2\xBB"],
-            '"',
-            $content
-        );
-
-        // Заголовок: внутри кавычек «Сумма» + любые пробелы/переносы + «себестоимости» → одна строка
-        $content = preg_replace('/"Сумма\s+себестоимости"/u', '"Сумма себестоимости"', $content);
-        $content = str_replace('"Сумма'."\n".'себестоимости"', '"Сумма себестоимости"', $content);
-
-        if (! str_contains($content, ',Код,Артикул,') && ! str_contains($content, ';Код;Артикул;')) {
-            throw new \RuntimeException(
-                'После разбора CSV не найдена строка заголовка с «Код» и «Артикул». '.
-                'Уберите перенос строки внутри ячейки «Сумма / себестоимости» в первой строке таблицы или сохраните файл как CSV UTF-8.'
-            );
-        }
-
-        $delimiter = ',';
-        if (str_contains($content, ',Код,Артикул,') || preg_match('/(^|\n),Код,Артикул,/u', $content)) {
-            $delimiter = ',';
-        } elseif (str_contains($content, ';Код;Артикул;') || preg_match('/(^|\n);Код;Артикул;/u', $content)) {
-            $delimiter = ';';
-        } else {
-            foreach (explode("\n", $content) as $line) {
-                if (str_contains($line, 'Код') && str_contains($line, 'Артикул')) {
-                    $delimiter = substr_count($line, ';') > substr_count($line, ',') ? ';' : ',';
-
-                    break;
-                }
-            }
-        }
-
-        $handle = fopen('php://temp', 'r+b');
-        if ($handle === false) {
-            throw new \RuntimeException('Не удалось создать временный поток.');
-        }
-        fwrite($handle, $content);
-        rewind($handle);
-
-        return [$handle, $delimiter, $content];
     }
 
     private function isSectionHeaderRow(string $skuRaw, string $name, string $code): bool
@@ -526,28 +372,5 @@ class RemainsStockCsvImportService
         }
 
         return Str::limit($slug, 500, '');
-    }
-
-    private function normalizeUtf8String(string $s): string
-    {
-        if ($s === '') {
-            return '';
-        }
-
-        if (function_exists('iconv')) {
-            $clean = @iconv('UTF-8', 'UTF-8//IGNORE', $s);
-            if ($clean !== false) {
-                $s = $clean;
-            }
-        }
-
-        if (! mb_check_encoding($s, 'UTF-8')) {
-            $converted = @mb_convert_encoding($s, 'UTF-8', 'Windows-1251');
-            if (is_string($converted) && mb_check_encoding($converted, 'UTF-8')) {
-                return $converted;
-            }
-        }
-
-        return $s;
     }
 }
