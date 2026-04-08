@@ -74,8 +74,29 @@ final class RemainsStockCsvReader
         }
 
         $asUtf8 = self::convertFileBytesToUtf8Text($raw);
+        $preCollapse = self::preCollapseNormalize($asUtf8);
         $content = self::normalizeFileContentString($asUtf8);
-        $meta = self::locateHeaderInNormalizedContent($content);
+
+        $meta = self::locateHeaderByUtf8MarkerLine($content)
+            ?? self::locateHeaderByScanningFgetcsv($content, 12_000);
+
+        if ($meta === null) {
+            $meta = self::locateHeaderByUtf8MarkerLine($preCollapse)
+                ?? self::locateHeaderByScanningFgetcsv($preCollapse, 12_000);
+            if ($meta !== null) {
+                if (isset($meta['_header_physical_line'])) {
+                    $meta = self::relocateHeaderMetaUsingPhysicalLine($content, $meta)
+                        ?? self::locateHeaderByScanningFgetcsv($content, 12_000);
+                } else {
+                    $pos = $meta['after_byte_pos'];
+                    $prefixOk = $pos <= strlen($preCollapse) && $pos <= strlen($content)
+                        && substr($preCollapse, 0, $pos) === substr($content, 0, $pos);
+                    if (! $prefixOk) {
+                        $meta = self::locateHeaderByScanningFgetcsv($content, 12_000) ?? $meta;
+                    }
+                }
+            }
+        }
 
         if ($meta === null) {
             $cp1251 = self::tryDecodeAsCp1251ThenNormalize($raw);
@@ -101,6 +122,8 @@ final class RemainsStockCsvReader
         fwrite($handle, $content);
         rewind($handle);
 
+        unset($meta['_header_physical_line']);
+
         return [$handle, $meta['delimiter'], $content, $meta['after_byte_pos'], $meta['header']];
     }
 
@@ -108,6 +131,39 @@ final class RemainsStockCsvReader
      * @return array{delimiter: string, after_byte_pos: int, header: list<string>}|null
      */
     private static function locateHeaderInNormalizedContent(string $content): ?array
+    {
+        return self::locateHeaderByScanningFgetcsv($content)
+            ?? self::locateHeaderByUtf8MarkerLine($content);
+    }
+
+    /**
+     * @param  array{delimiter: string, after_byte_pos: int, header: list<string>, _header_physical_line?: string}  $meta
+     * @return array{delimiter: string, after_byte_pos: int, header: list<string>}|null
+     */
+    private static function relocateHeaderMetaUsingPhysicalLine(string $content, array $meta): ?array
+    {
+        $line = $meta['_header_physical_line'] ?? null;
+        unset($meta['_header_physical_line']);
+        if (! is_string($line) || $line === '') {
+            return null;
+        }
+
+        $p = strpos($content, $line);
+        if ($p === false) {
+            return null;
+        }
+
+        $lineEnd = strpos($content, "\n", $p);
+        $afterBytePos = $lineEnd === false ? strlen($content) : $lineEnd + 1;
+        $meta['after_byte_pos'] = $afterBytePos;
+
+        return $meta;
+    }
+
+    /**
+     * @return array{delimiter: string, after_byte_pos: int, header: list<string>, _header_physical_line?: string}|null
+     */
+    private static function locateHeaderByScanningFgetcsv(string $content, ?int $maxLogicalRows = null): ?array
     {
         foreach ([',', ';', "\t"] as $delimiter) {
             $h = fopen('php://temp', 'r+b');
@@ -117,7 +173,12 @@ final class RemainsStockCsvReader
             fwrite($h, $content);
             rewind($h);
 
+            $rowsRead = 0;
             while (($row = self::readCsvRow($h, $delimiter)) !== false) {
+                if ($maxLogicalRows !== null && $rowsRead >= $maxLogicalRows) {
+                    break;
+                }
+                $rowsRead++;
                 $normalized = array_map(fn ($c) => self::normalizeCsvHeaderCell($c), $row);
                 if (self::parsedRowIsRemainsTableHeader($normalized)) {
                     $after = ftell($h);
@@ -134,7 +195,7 @@ final class RemainsStockCsvReader
             fclose($h);
         }
 
-        return self::locateHeaderByUtf8MarkerLine($content);
+        return null;
     }
 
     /**
@@ -211,6 +272,7 @@ final class RemainsStockCsvReader
             'delimiter' => $delimiter,
             'after_byte_pos' => $afterBytePos,
             'header' => $normalized,
+            '_header_physical_line' => $line,
         ];
     }
 
@@ -295,7 +357,10 @@ final class RemainsStockCsvReader
         return trim($s);
     }
 
-    private static function normalizeFileContentString(string $bytes): string
+    /**
+     * BOM, переводы строк и «умные» кавычки — без collapse (он может ломать поиск заголовка в больших файлах).
+     */
+    private static function preCollapseNormalize(string $bytes): string
     {
         while (str_starts_with($bytes, "\xEF\xBB\xBF")) {
             $bytes = substr($bytes, 3);
@@ -303,11 +368,16 @@ final class RemainsStockCsvReader
 
         $content = str_replace(["\r\n", "\r"], "\n", $bytes);
 
-        $content = str_replace(
+        return str_replace(
             ["\xE2\x80\x9C", "\xE2\x80\x9D", "\xE2\x80\x9E", "\xC2\xAB", "\xC2\xBB"],
             '"',
             $content
         );
+    }
+
+    private static function normalizeFileContentString(string $bytes): string
+    {
+        $content = self::preCollapseNormalize($bytes);
 
         $content = self::collapseNewlinesInsideDoubleQuotedFields($content);
 
