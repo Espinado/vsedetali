@@ -116,6 +116,9 @@ final class RemainsStockCsvReader
             $content
         );
 
+        $content = self::collapseNewlinesInsideDoubleQuotedFields($content);
+
+        $content = preg_replace('/"Сумма\s*\/\s*себестоимости"/u', '"Сумма себестоимости"', $content);
         $content = preg_replace('/"Сумма\s+себестоимости"/u', '"Сумма себестоимости"', $content);
         $content = str_replace('"Сумма'."\n".'себестоимости"', '"Сумма себестоимости"', $content);
 
@@ -202,6 +205,54 @@ final class RemainsStockCsvReader
         }
 
         return (bool) preg_match('/(?:^|;)\s*Код\s*;\s*Артикул\s*(?:;|$)/u', $headerLine);
+    }
+
+    /**
+     * Excel/1C иногда сохраняют перенос строки внутри кавычек («Сумма» + newline + «себестоимости»),
+     * из‑за этого подстрока «,Код,Артикул,» не находится в одной текстовой строке.
+     */
+    private static function collapseNewlinesInsideDoubleQuotedFields(string $content): string
+    {
+        $len = strlen($content);
+        if ($len === 0) {
+            return $content;
+        }
+
+        $out = '';
+        $inQuotes = false;
+        for ($i = 0; $i < $len; $i++) {
+            $c = $content[$i];
+            if ($c === '"') {
+                if ($inQuotes && $i + 1 < $len && $content[$i + 1] === '"') {
+                    $out .= '""';
+                    $i++;
+
+                    continue;
+                }
+                $inQuotes = ! $inQuotes;
+                $out .= '"';
+
+                continue;
+            }
+            if ($inQuotes) {
+                if ($c === "\r") {
+                    if ($i + 1 < $len && $content[$i + 1] === "\n") {
+                        $i++;
+                    }
+                    $out .= ' ';
+
+                    continue;
+                }
+                if ($c === "\n") {
+                    $out .= ' ';
+
+                    continue;
+                }
+            }
+            $out .= $c;
+        }
+
+        return $out;
     }
 
     public static function normalizeUtf8String(string $s): string
