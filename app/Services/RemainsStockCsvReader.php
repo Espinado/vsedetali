@@ -2,8 +2,6 @@
 
 namespace App\Services;
 
-use Illuminate\Support\Str;
-
 /**
  * Чтение CSV отчёта «Остатки» (Код, Артикул, …) — та же нормализация, что в {@see RemainsStockCsvImportService}.
  */
@@ -16,53 +14,10 @@ final class RemainsStockCsvReader
      */
     public static function readHeaderRow(string $absolutePath): array
     {
-        [$handle, $delimiter, $content] = self::openNormalizedCsvStream($absolutePath);
+        [$handle, , , , $header] = self::openNormalizedCsvStream($absolutePath);
         fclose($handle);
 
-        $markers = [',Код,Артикул,', ';Код;Артикул;'];
-        $pos = false;
-        $matchedMarker = null;
-        foreach ($markers as $m) {
-            $pos = strpos($content, $m);
-            if ($pos !== false) {
-                $matchedMarker = $m;
-
-                break;
-            }
-        }
-
-        if ($pos === false || $matchedMarker === null) {
-            throw new \RuntimeException(
-                'В тексте файла не найдена подстрока «,Код,Артикул,» (или с «;»).'
-            );
-        }
-
-        $lineStart = strrpos(substr($content, 0, $pos), "\n");
-        $lineStart = $lineStart === false ? 0 : $lineStart + 1;
-        $lineEnd = strpos($content, "\n", $lineStart);
-        $headerLine = $lineEnd === false
-            ? substr($content, $lineStart)
-            : substr($content, $lineStart, $lineEnd - $lineStart);
-
-        if (! self::headerLineLooksLikeDataTable($headerLine, $delimiter)) {
-            throw new \RuntimeException(
-                'Строка заголовка не распознана. Начало: '.Str::limit($headerLine, 240)
-            );
-        }
-
-        $mem = fopen('php://memory', 'r+b');
-        if ($mem === false) {
-            throw new \RuntimeException('Не удалось разобрать строку заголовка.');
-        }
-        fwrite($mem, $headerLine);
-        rewind($mem);
-        $row = fgetcsv($mem, 0, $delimiter, '"');
-        fclose($mem);
-        if ($row === false) {
-            return [];
-        }
-
-        return array_map(fn ($c) => self::normalizeUtf8String(trim((string) ($c ?? ''), " \t\n\r\0\x0B\xEF\xBB\xBF")), $row);
+        return $header;
     }
 
     /**
@@ -76,10 +31,12 @@ final class RemainsStockCsvReader
             throw new \InvalidArgumentException("Файл недоступен: {$absolutePath}");
         }
 
-        [$handle, $delimiter, $content] = self::openNormalizedCsvStream($absolutePath);
-        self::seekStreamAfterHeaderRow($handle, $content, $delimiter);
+        [$handle, $delimiter, , $afterHeaderBytePos, ] = self::openNormalizedCsvStream($absolutePath);
 
         try {
+            rewind($handle);
+            fseek($handle, $afterHeaderBytePos);
+
             while (($row = fgetcsv($handle, 0, $delimiter, '"')) !== false) {
                 $row = array_map(
                     fn ($c) => self::normalizeUtf8String(trim((string) ($c ?? ''), " \t\n\r\0\x0B\xEF\xBB\xBF")),
@@ -95,53 +52,32 @@ final class RemainsStockCsvReader
     }
 
     /**
-     * @return array{0: resource, 1: string, 2: string}
+     * @return array{0: resource, 1: string, 2: string, 3: int, 4: list<string>}
      */
     public static function openNormalizedCsvStream(string $absolutePath): array
     {
-        $content = file_get_contents($absolutePath);
-        if ($content === false) {
+        $raw = file_get_contents($absolutePath);
+        if ($raw === false) {
             throw new \RuntimeException('Не удалось прочитать файл.');
         }
 
-        if (str_starts_with($content, "\xEF\xBB\xBF")) {
-            $content = substr($content, 3);
+        $content = self::normalizeFileContentString($raw);
+        $meta = self::locateHeaderInNormalizedContent($content);
+
+        if ($meta === null) {
+            $cp1251 = self::tryDecodeAsCp1251ThenNormalize($raw);
+            if ($cp1251 !== null) {
+                $content = $cp1251;
+                $meta = self::locateHeaderInNormalizedContent($content);
+            }
         }
 
-        $content = str_replace(["\r\n", "\r"], "\n", $content);
-
-        $content = str_replace(
-            ["\xE2\x80\x9C", "\xE2\x80\x9D", "\xE2\x80\x9E", "\xC2\xAB", "\xC2\xBB"],
-            '"',
-            $content
-        );
-
-        $content = self::collapseNewlinesInsideDoubleQuotedFields($content);
-
-        $content = preg_replace('/"Сумма\s*\/\s*себестоимости"/u', '"Сумма себестоимости"', $content);
-        $content = preg_replace('/"Сумма\s+себестоимости"/u', '"Сумма себестоимости"', $content);
-        $content = str_replace('"Сумма'."\n".'себестоимости"', '"Сумма себестоимости"', $content);
-
-        if (! str_contains($content, ',Код,Артикул,') && ! str_contains($content, ';Код;Артикул;')) {
+        if ($meta === null) {
             throw new \RuntimeException(
                 'После разбора CSV не найдена строка заголовка с «Код» и «Артикул». '.
-                'Уберите перенос строки внутри ячейки «Сумма / себестоимости» в первой строке таблицы или сохраните файл как CSV UTF-8.'
+                'Сохраните файл как CSV UTF-8 или CSV с разделителем «;»/«,» и колонками «Код», «Артикул». '.
+                'Если перенос строки внутри ячейки «Сумма / себестоимости» — пересохраните из Excel в UTF-8.'
             );
-        }
-
-        $delimiter = ',';
-        if (str_contains($content, ',Код,Артикул,') || preg_match('/(^|\n),Код,Артикул,/u', $content)) {
-            $delimiter = ',';
-        } elseif (str_contains($content, ';Код;Артикул;') || preg_match('/(^|\n);Код;Артикул;/u', $content)) {
-            $delimiter = ';';
-        } else {
-            foreach (explode("\n", $content) as $line) {
-                if (str_contains($line, 'Код') && str_contains($line, 'Артикул')) {
-                    $delimiter = substr_count($line, ';') > substr_count($line, ',') ? ';' : ',';
-
-                    break;
-                }
-            }
         }
 
         $handle = fopen('php://temp', 'r+b');
@@ -151,65 +87,103 @@ final class RemainsStockCsvReader
         fwrite($handle, $content);
         rewind($handle);
 
-        return [$handle, $delimiter, $content];
-    }
-
-    public static function seekStreamAfterHeaderRow($handle, string $content, string $delimiter): void
-    {
-        $markers = [',Код,Артикул,', ';Код;Артикул;'];
-        $pos = false;
-        $matchedMarker = null;
-        foreach ($markers as $m) {
-            $pos = strpos($content, $m);
-            if ($pos !== false) {
-                $matchedMarker = $m;
-
-                break;
-            }
-        }
-
-        if ($pos === false || $matchedMarker === null) {
-            throw new \RuntimeException(
-                'В тексте файла не найдена подстрока «,Код,Артикул,» (или с «;»). Сохраните CSV в UTF-8 и одну строку заголовка.'
-            );
-        }
-
-        $lineStart = strrpos(substr($content, 0, $pos), "\n");
-        $lineStart = $lineStart === false ? 0 : $lineStart + 1;
-        $lineEnd = strpos($content, "\n", $lineStart);
-        $headerLine = $lineEnd === false
-            ? substr($content, $lineStart)
-            : substr($content, $lineStart, $lineEnd - $lineStart);
-
-        if (! str_contains($headerLine, $matchedMarker)) {
-            throw new \RuntimeException(
-                'Строка заголовка обрезана неверно. Начало: '.Str::limit($headerLine, 240)
-            );
-        }
-
-        if (! self::headerLineLooksLikeDataTable($headerLine, $delimiter)) {
-            throw new \RuntimeException(
-                'Строка с «Код»/«Артикул» не похожа на заголовок таблицы. Начало строки: '.Str::limit($headerLine, 240)
-            );
-        }
-
-        $nextOffset = $lineEnd === false ? strlen($content) : $lineEnd + 1;
-        rewind($handle);
-        fseek($handle, $nextOffset);
-    }
-
-    public static function headerLineLooksLikeDataTable(string $headerLine, string $delimiter): bool
-    {
-        if ($delimiter === ',') {
-            return (bool) preg_match('/(?:^|,)\s*Код\s*,\s*Артикул\s*(?:,|$)/u', $headerLine);
-        }
-
-        return (bool) preg_match('/(?:^|;)\s*Код\s*;\s*Артикул\s*(?:;|$)/u', $headerLine);
+        return [$handle, $meta['delimiter'], $content, $meta['after_byte_pos'], $meta['header']];
     }
 
     /**
-     * Excel/1C иногда сохраняют перенос строки внутри кавычек («Сумма» + newline + «себестоимости»),
-     * из‑за этого подстрока «,Код,Артикул,» не находится в одной текстовой строке.
+     * @return array{delimiter: string, after_byte_pos: int, header: list<string>}|null
+     */
+    private static function locateHeaderInNormalizedContent(string $content): ?array
+    {
+        foreach ([',', ';'] as $delimiter) {
+            $h = fopen('php://temp', 'r+b');
+            if ($h === false) {
+                continue;
+            }
+            fwrite($h, $content);
+            rewind($h);
+
+            while (($row = fgetcsv($h, 0, $delimiter, '"')) !== false) {
+                $normalized = array_map(
+                    fn ($c) => self::normalizeUtf8String(trim((string) ($c ?? ''), " \t\n\r\0\x0B\xEF\xBB\xBF")),
+                    $row
+                );
+                if (self::parsedRowIsRemainsTableHeader($normalized)) {
+                    $after = ftell($h);
+                    fclose($h);
+
+                    return [
+                        'delimiter' => $delimiter,
+                        'after_byte_pos' => $after !== false ? $after : strlen($content),
+                        'header' => $normalized,
+                    ];
+                }
+            }
+
+            fclose($h);
+        }
+
+        return null;
+    }
+
+    /**
+     * @param  list<string>  $cells
+     */
+    private static function parsedRowIsRemainsTableHeader(array $cells): bool
+    {
+        $hasKod = false;
+        $hasArtikul = false;
+        foreach ($cells as $cell) {
+            if ($cell === 'Код') {
+                $hasKod = true;
+            }
+            if ($cell === 'Артикул') {
+                $hasArtikul = true;
+            }
+        }
+
+        return $hasKod && $hasArtikul;
+    }
+
+    private static function normalizeFileContentString(string $bytes): string
+    {
+        if (str_starts_with($bytes, "\xEF\xBB\xBF")) {
+            $bytes = substr($bytes, 3);
+        }
+
+        $content = str_replace(["\r\n", "\r"], "\n", $bytes);
+
+        $content = str_replace(
+            ["\xE2\x80\x9C", "\xE2\x80\x9D", "\xE2\x80\x9E", "\xC2\xAB", "\xC2\xBB"],
+            '"',
+            $content
+        );
+
+        $content = self::collapseNewlinesInsideDoubleQuotedFields($content);
+
+        $content = preg_replace('/"Сумма\s*\/\s*себестоимости"/u', '"Сумма себестоимости"', $content) ?? $content;
+        $content = preg_replace('/"Сумма\s+себестоимости"/u', '"Сумма себестоимости"', $content) ?? $content;
+        $content = str_replace('"Сумма'."\n".'себестоимости"', '"Сумма себестоимости"', $content);
+
+        return $content;
+    }
+
+    private static function tryDecodeAsCp1251ThenNormalize(string $raw): ?string
+    {
+        if (str_starts_with($raw, "\xEF\xBB\xBF")) {
+            $raw = substr($raw, 3);
+        }
+
+        $converted = @mb_convert_encoding($raw, 'UTF-8', 'Windows-1251');
+        if (! is_string($converted) || $converted === '' || ! mb_check_encoding($converted, 'UTF-8')) {
+            return null;
+        }
+
+        return self::normalizeFileContentString($converted);
+    }
+
+    /**
+     * Excel/1C иногда сохраняют перенос строки внутри кавычек («Сумма» + newline + «себестоимости»).
      */
     private static function collapseNewlinesInsideDoubleQuotedFields(string $content): string
     {
