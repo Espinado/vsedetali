@@ -77,22 +77,28 @@ final class RemainsStockCsvReader
         $preCollapse = self::preCollapseNormalize($asUtf8);
         $content = self::normalizeFileContentString($asUtf8);
 
-        $meta = self::locateHeaderByUtf8MarkerLine($content)
+        $meta = self::locateHeaderByPhysicalLineScan($content)
+            ?? self::locateHeaderByUtf8MarkerLine($content)
             ?? self::locateHeaderByScanningFgetcsv($content, 12_000);
 
         if ($meta === null) {
-            $meta = self::locateHeaderByUtf8MarkerLine($preCollapse)
+            $meta = self::locateHeaderByPhysicalLineScan($preCollapse)
+                ?? self::locateHeaderByUtf8MarkerLine($preCollapse)
                 ?? self::locateHeaderByScanningFgetcsv($preCollapse, 12_000);
             if ($meta !== null) {
                 if (isset($meta['_header_physical_line'])) {
                     $meta = self::relocateHeaderMetaUsingPhysicalLine($content, $meta)
+                        ?? self::locateHeaderByPhysicalLineScan($content)
+                        ?? self::locateHeaderByUtf8MarkerLine($content)
                         ?? self::locateHeaderByScanningFgetcsv($content, 12_000);
                 } else {
                     $pos = $meta['after_byte_pos'];
                     $prefixOk = $pos <= strlen($preCollapse) && $pos <= strlen($content)
                         && substr($preCollapse, 0, $pos) === substr($content, 0, $pos);
                     if (! $prefixOk) {
-                        $meta = self::locateHeaderByScanningFgetcsv($content, 12_000) ?? $meta;
+                        $meta = self::locateHeaderByPhysicalLineScan($content)
+                            ?? self::locateHeaderByScanningFgetcsv($content, 12_000)
+                            ?? $meta;
                     }
                 }
             }
@@ -199,6 +205,55 @@ final class RemainsStockCsvReader
     }
 
     /**
+     * Построчный поиск (по символу \\n): не зависит от fgetcsv и не гоняет regex по всему 14+ МБ файла.
+     *
+     * @return array{delimiter: string, after_byte_pos: int, header: list<string>, _header_physical_line?: string}|null
+     */
+    private static function locateHeaderByPhysicalLineScan(string $content, int $maxPhysicalLines = 30_000): ?array
+    {
+        $len = strlen($content);
+        $pos = 0;
+        for ($lineNum = 0; $lineNum < $maxPhysicalLines && $pos < $len; $lineNum++) {
+            $lineEnd = strpos($content, "\n", $pos);
+            $line = $lineEnd === false
+                ? substr($content, $pos)
+                : substr($content, $pos, $lineEnd - $pos);
+            $afterPos = $lineEnd === false ? $len : $lineEnd + 1;
+
+            $tryDelims = [];
+            if (@preg_match('/,\s*Код\s*,\s*Артикул\s*,/u', $line) === 1) {
+                $tryDelims[] = ',';
+            }
+            if (@preg_match('/;\s*Код\s*;\s*Артикул\s*;/u', $line) === 1) {
+                $tryDelims[] = ';';
+            }
+            if (@preg_match('/\t\s*Код\s*\t\s*Артикул\s*\t/u', $line) === 1) {
+                $tryDelims[] = "\t";
+            }
+
+            foreach ($tryDelims as $d) {
+                $row = self::strGetCsvRow($line, $d);
+                if ($row === []) {
+                    continue;
+                }
+                $normalized = array_map(fn ($c) => self::normalizeCsvHeaderCell($c), $row);
+                if (self::parsedRowIsRemainsTableHeader($normalized)) {
+                    return [
+                        'delimiter' => $d,
+                        'after_byte_pos' => $afterPos,
+                        'header' => $normalized,
+                        '_header_physical_line' => $line,
+                    ];
+                }
+            }
+
+            $pos = $afterPos;
+        }
+
+        return null;
+    }
+
+    /**
      * Если выше строки заголовка есть «битая» кавычка, fgetcsv съедает заголовок в состав предыдущей записи.
      * Ищем однозначную UTF-8 метку «,Код,Артикул,» / «;Код;Артикул;» и разбираем одну физическую строку.
      *
@@ -212,14 +267,22 @@ final class RemainsStockCsvReader
             ["\t", '/\t\s*Код\s*\t\s*Артикул\s*\t/u'],
         ];
 
-        foreach ($regexAttempts as [$delimiter, $pattern]) {
-            if (preg_match($pattern, $content, $m, PREG_OFFSET_CAPTURE) !== 1) {
-                continue;
-            }
+        $headLen = min(16 * 1048576, strlen($content));
 
-            $meta = self::extractHeaderLineMetaFromMatch($content, (int) $m[0][1], $delimiter);
-            if ($meta !== null) {
-                return $meta;
+        foreach ($regexAttempts as [$delimiter, $pattern]) {
+            $haystacks = strlen($content) <= $headLen
+                ? [$content]
+                : [substr($content, 0, $headLen), $content];
+
+            foreach ($haystacks as $hay) {
+                if (@preg_match($pattern, $hay, $m, PREG_OFFSET_CAPTURE) !== 1) {
+                    continue;
+                }
+
+                $meta = self::extractHeaderLineMetaFromMatch($content, (int) $m[0][1], $delimiter);
+                if ($meta !== null) {
+                    return $meta;
+                }
             }
         }
 
