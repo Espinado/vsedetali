@@ -74,8 +74,26 @@ class ProductController extends Controller
                 : 'https://schema.org/PreOrder',
         ];
 
+        $vehiclesSorted = $product->vehicles->sortBy(fn ($v) => [
+            mb_strtolower((string) $v->make),
+            mb_strtolower((string) $v->model),
+        ]);
+
+        $crossAnalogItems = $product->crossNumbersWithLinkedProducts();
+
+        $vehiclesCompatLinks = $vehiclesSorted
+            ->map(fn (\App\Models\Vehicle $v) => [
+                'vehicle' => $v,
+                'label' => $product->vehicleCompatibilityLineForStorefront($v),
+            ])
+            ->filter(fn (array $row) => $row['label'] !== '')
+            ->values();
+
         return view('storefront.product.show', [
             'product' => $product,
+            'vehiclesSorted' => $vehiclesSorted,
+            'vehiclesCompatLinks' => $vehiclesCompatLinks,
+            'crossAnalogItems' => $crossAnalogItems,
             'metaDescription' => $metaDescription,
             'canonicalUrl' => $canonicalUrl,
             'ogImageUrl' => $ogImageUrl,

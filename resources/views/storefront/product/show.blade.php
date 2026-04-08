@@ -11,11 +11,13 @@
 @endpush
 
 @section('content')
-    <nav class="text-sm text-slate-500 mb-6">
-        <a href="{{ route('catalog') }}" class="hover:text-slate-700">Каталог</a>
+    <nav class="text-sm text-slate-500 mb-6" aria-label="Навигация">
+        <a href="{{ route('catalog') }}" class="font-medium text-slate-700 hover:text-slate-900">Каталог</a>
         @if($product->category)
-            <span class="mx-1">/</span>
-            <a href="{{ route('catalog', ['categorySlug' => $product->category->slug]) }}" class="hover:text-slate-700">{{ $product->category->name }}</a>
+            @foreach($product->category->ancestorsChainForStorefront() as $cat)
+                <span class="mx-1">/</span>
+                <a href="{{ route('catalog', ['categorySlug' => $cat->slug]) }}" class="hover:text-slate-700">{{ $cat->name }}</a>
+            @endforeach
         @endif
     </nav>
 
@@ -67,9 +69,9 @@
                 @endif
             </p>
 
-            @if($product->oemNumbers->isNotEmpty() || $product->crossNumbers->isNotEmpty() || $product->vehicles->isNotEmpty())
+            @if($product->oemNumbers->isNotEmpty() || $crossAnalogItems->isNotEmpty() || $vehiclesCompatLinks->isNotEmpty())
                 <div class="mb-6 rounded-xl border border-slate-200 bg-slate-50 p-4">
-                    <h2 class="text-sm font-semibold text-slate-800 mb-3">Быстрая информация</h2>
+                    <h2 class="text-sm font-semibold text-slate-800 mb-3">Кратко</h2>
 
                     <div class="space-y-2 text-sm">
                         @if($product->oemNumbers->isNotEmpty())
@@ -79,29 +81,28 @@
                             </div>
                         @endif
 
-                        @if($product->crossNumbers->isNotEmpty())
+                        @if($crossAnalogItems->isNotEmpty())
                             <div>
-                                <p class="text-slate-500 mb-1">Аналоги</p>
-                                <p class="font-mono text-slate-800">{{ $product->crossNumbers->take(5)->pluck('cross_number')->join(', ') }}</p>
+                                <p class="text-slate-500 mb-1">Аналоги в каталоге</p>
+                                <p class="text-slate-700">
+                                    Найдено в каталоге: {{ $crossAnalogItems->count() }}
+                                    <a href="#analogs" class="text-slate-900 underline underline-offset-2">смотреть</a>
+                                </p>
                             </div>
                         @endif
 
-                        @if($product->vehicles->isNotEmpty())
+                        @if($vehiclesCompatLinks->isNotEmpty())
                             <div>
-                                <p class="text-slate-500 mb-1">Совместимость</p>
-                                <div class="flex flex-wrap gap-2">
-                                    @foreach($product->vehicles->take(4) as $vehicle)
-                                        <span class="inline-flex items-center rounded-full bg-white px-3 py-1 text-xs text-slate-700 border border-slate-200">
-                                            {{ $vehicle->make }} {{ $vehicle->model }}
-                                            @if($vehicle->year_from || $vehicle->year_to)
-                                                ({{ $vehicle->year_from ?? '—' }}–{{ $vehicle->year_to ?? '—' }})
-                                            @endif
-                                        </span>
+                                <p class="text-slate-500 mb-1.5">Совместимость</p>
+                                <p class="text-slate-800 leading-relaxed text-[15px]">
+                                    @foreach($vehiclesCompatLinks as $row)
+                                        @unless($loop->first)<span class="text-slate-400">, </span>@endunless
+                                        <a href="{{ route('catalog', ['vehicleId' => $row['vehicle']->id]) }}"
+                                           class="text-slate-900 underline decoration-slate-300 hover:decoration-slate-700 underline-offset-2">
+                                            {{ $row['label'] }}
+                                        </a>
                                     @endforeach
-                                </div>
-                                @if($product->vehicles->count() > 4)
-                                    <p class="mt-2 text-xs text-slate-500">И ещё {{ $product->vehicles->count() - 4 }} совместимых вариантов</p>
-                                @endif
+                                </p>
                             </div>
                         @endif
                     </div>
@@ -143,30 +144,7 @@
         </section>
     @endif
 
-    {{-- Совместимость (автомобили) --}}
-    @if($product->vehicles->isNotEmpty())
-        <section class="mt-12 pt-8 border-t border-slate-200">
-            <h2 class="text-lg font-semibold text-slate-800 mb-4">Подходит для автомобилей</h2>
-            <ul class="flex flex-wrap gap-2">
-                @foreach($product->vehicles->take(20) as $vehicle)
-                    <li class="px-3 py-1.5 bg-slate-100 rounded text-sm text-slate-700">
-                        {{ $vehicle->make }} {{ $vehicle->model }}
-                        @if($vehicle->year_from || $vehicle->year_to)
-                            ({{ $vehicle->year_from ?? '—' }}–{{ $vehicle->year_to ?? '—' }})
-                        @endif
-                        @if($vehicle->pivot?->oem_number)
-                            <span class="text-slate-500">— {{ $vehicle->pivot->oem_number }}</span>
-                        @endif
-                    </li>
-                @endforeach
-            </ul>
-            @if($product->vehicles->count() > 20)
-                <p class="mt-2 text-sm text-slate-500">и ещё {{ $product->vehicles->count() - 20 }} моделей</p>
-            @endif
-        </section>
-    @endif
-
-    {{-- OEM номера --}}
+    {{-- OEM номера (полный список) --}}
     @if($product->oemNumbers->isNotEmpty())
         <section class="mt-12 pt-8 border-t border-slate-200">
             <h2 class="text-lg font-semibold text-slate-800 mb-4">OEM номера</h2>
@@ -174,11 +152,39 @@
         </section>
     @endif
 
-    {{-- Кросс-номера (аналоги) --}}
-    @if($product->crossNumbers->isNotEmpty())
-        <section class="mt-12 pt-8 border-t border-slate-200">
-            <h2 class="text-lg font-semibold text-slate-800 mb-4">Аналоги (кросс-номера)</h2>
-            <p class="text-slate-600 font-mono text-sm">{{ $product->crossNumbers->pluck('cross_number')->join(', ') }}</p>
+    {{-- Аналоги: номер + ссылка на товар в магазине --}}
+    @if($crossAnalogItems->isNotEmpty())
+        <section id="analogs" class="mt-12 pt-8 border-t border-slate-200 scroll-mt-8">
+            <h2 class="text-lg font-semibold text-slate-800 mb-4">Аналоги других производителей</h2>
+            <p class="text-sm text-slate-500 mb-4">Показываются только аналоги, которые есть в нашем каталоге как отдельные товары (совпадение номера).</p>
+            <div class="overflow-x-auto rounded-lg border border-slate-200">
+                <table class="min-w-full text-sm text-left">
+                    <thead class="bg-slate-50 text-slate-600 font-medium border-b border-slate-200">
+                        <tr>
+                            <th class="px-4 py-3">Производитель аналога</th>
+                            <th class="px-4 py-3">Номер аналога</th>
+                            <th class="px-4 py-3">Товар</th>
+                        </tr>
+                    </thead>
+                    <tbody class="divide-y divide-slate-100">
+                        @foreach($crossAnalogItems as $item)
+                            <tr class="hover:bg-slate-50/80">
+                                <td class="px-4 py-3 text-slate-800">{{ $item->cross->manufacturer_name ?: '—' }}</td>
+                                <td class="px-4 py-3 font-mono text-slate-900">{{ $item->cross->cross_number }}</td>
+                                <td class="px-4 py-3">
+                                    <a href="{{ route('product.show', $item->linked) }}" class="text-slate-900 font-medium hover:underline">
+                                        {{ $item->linked->name }}
+                                    </a>
+                                    @if($item->linked->brand)
+                                        <span class="text-slate-500 text-sm"> — {{ $item->linked->brand->name }}</span>
+                                    @endif
+                                    <span class="block text-xs text-slate-400 font-mono mt-0.5">{{ $item->linked->sku }}</span>
+                                </td>
+                            </tr>
+                        @endforeach
+                    </tbody>
+                </table>
+            </div>
         </section>
     @endif
 @endsection

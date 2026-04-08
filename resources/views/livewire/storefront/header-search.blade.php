@@ -26,7 +26,7 @@
         </button>
     </form>
 
-    @if (mb_strlen(trim($query)) >= 2)
+    @if ($resultsPanelOpen && mb_strlen(trim($query)) >= 2)
         <div class="absolute left-0 right-0 top-full z-50 mt-2 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-lg">
             @if ($this->results->isNotEmpty())
                 <div class="divide-y divide-slate-100">
@@ -34,6 +34,7 @@
                         <a
                             href="{{ route('product.show', $product) }}"
                             wire:key="header-search-{{ $product->id }}"
+                            wire:click="closeResultsPanel"
                             class="flex items-center gap-3 px-4 py-3 hover:bg-slate-50"
                         >
                             <div class="h-14 w-14 shrink-0 overflow-hidden rounded bg-slate-100">
@@ -62,7 +63,7 @@
                                             ·
                                         @endif
                                         @if ($product->crossNumbers->isNotEmpty())
-                                            Аналоги: {{ $product->crossNumbers->take(2)->pluck('cross_number')->join(', ') }}
+                                            Аналоги: {{ $product->crossNumbers->take(2)->map(fn ($c) => $c->storefrontAnalogLabel())->join(', ') }}
                                         @endif
                                     </p>
                                 @endif
@@ -75,7 +76,11 @@
                 </div>
 
                 <div class="border-t border-slate-100 bg-slate-50 px-4 py-3">
-                    <a href="{{ route('catalog', ['search' => trim($query)]) }}" class="text-sm font-medium text-indigo-600 hover:text-indigo-700">
+                    <a
+                        href="{{ route('catalog', ['search' => trim($query)]) }}"
+                        wire:click="closeResultsPanel"
+                        class="text-sm font-medium text-indigo-600 hover:text-indigo-700"
+                    >
                         Смотреть все результаты
                     </a>
                 </div>

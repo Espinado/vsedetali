@@ -7,25 +7,39 @@ namespace App\Services;
  */
 class StockCsvEnrichmentService
 {
+    public const SOURCE_HEADER = 'Источник каталога';
+
+    public const SKU_HEADER = 'Артикул';
+
     public function __construct(
         protected AutoPartsCatalogService $catalog
     ) {}
 
     /**
+     * @param  array{
+     *   resume_from_csv?: string|null,
+     *   only_skus_file?: string|null,
+     *   write_not_found_list?: bool,
+     *   not_found_output_path?: string|null,
+     * }  $options
      * @return array{
      *   rows_total: int,
      *   rows_enriched: int,
+     *   rows_resumed: int,
+     *   rows_passthrough_only_sku_filter: int,
      *   rows_skipped_section: int,
      *   rows_skipped_empty: int,
      *   rows_skipped_not_found: int,
      *   errors: int,
+     *   not_found_list_path: string|null,
      * }
      */
     public function enrichToFile(
         string $inputAbsolutePath,
         string $outputAbsolutePath,
         int $limit = 0,
-        int $sleepMsBetweenRequests = 150
+        int $sleepMsBetweenRequests = 150,
+        array $options = []
     ): array {
         if (! $this->catalog->isConfigured()) {
             throw new \RuntimeException(
@@ -33,17 +47,51 @@ class StockCsvEnrichmentService
             );
         }
 
+        $resumePath = isset($options['resume_from_csv']) ? trim((string) $options['resume_from_csv']) : '';
+        $resumePath = $resumePath !== '' ? $resumePath : null;
+        $onlySkusPath = isset($options['only_skus_file']) ? trim((string) $options['only_skus_file']) : '';
+        $onlySkusPath = $onlySkusPath !== '' ? $onlySkusPath : null;
+        $writeNotFound = array_key_exists('write_not_found_list', $options)
+            ? (bool) $options['write_not_found_list']
+            : true;
+        $notFoundCustom = isset($options['not_found_output_path']) ? trim((string) $options['not_found_output_path']) : '';
+        $notFoundCustom = $notFoundCustom !== '' ? $notFoundCustom : null;
+
+        $resumeMap = $resumePath !== null && is_file($resumePath)
+            ? $this->loadResumeRowsBySku($resumePath)
+            : [];
+
+        $onlySkuSet = $onlySkusPath !== null && is_file($onlySkusPath)
+            ? $this->loadSkuSetFromTextFile($onlySkusPath)
+            : null;
+
+        $notFoundPath = null;
+        $notFoundHandle = null;
+        if ($writeNotFound) {
+            $notFoundPath = $notFoundCustom ?? $this->defaultNotFoundListPath($outputAbsolutePath);
+            $notFoundHandle = fopen($notFoundPath, 'wb');
+            if ($notFoundHandle === false) {
+                throw new \RuntimeException("Не удалось записать список не найденных: {$notFoundPath}");
+            }
+        }
+
         $stats = [
             'rows_total' => 0,
             'rows_enriched' => 0,
+            'rows_resumed' => 0,
+            'rows_passthrough_only_sku_filter' => 0,
             'rows_skipped_section' => 0,
             'rows_skipped_empty' => 0,
             'rows_skipped_not_found' => 0,
             'errors' => 0,
+            'not_found_list_path' => $notFoundPath,
         ];
 
         $out = fopen($outputAbsolutePath, 'wb');
         if ($out === false) {
+            if ($notFoundHandle !== null) {
+                fclose($notFoundHandle);
+            }
             throw new \RuntimeException("Не удалось записать файл: {$outputAbsolutePath}");
         }
 
@@ -95,14 +143,37 @@ class StockCsvEnrichmentService
                     continue;
                 }
 
+                if ($onlySkuSet !== null && ! isset($onlySkuSet[$skuRaw])) {
+                    if (isset($resumeMap[$skuRaw])) {
+                        fputcsv($out, $resumeMap[$skuRaw], ',');
+                        $stats['rows_resumed']++;
+                    } else {
+                        fputcsv($out, array_merge($row, array_fill(0, count($extraHeaders), '')), ',');
+                        $stats['rows_passthrough_only_sku_filter']++;
+                    }
+
+                    continue;
+                }
+
+                if (isset($resumeMap[$skuRaw])) {
+                    fputcsv($out, $resumeMap[$skuRaw], ',');
+                    $stats['rows_resumed']++;
+
+                    continue;
+                }
+
                 if ($limit > 0 && $stats['rows_enriched'] >= $limit) {
                     break;
                 }
 
                 try {
-                    $enriched = $this->catalog->lookupEnrichedForStock($skuRaw);
+                    $codeAlt = trim($code) !== '' ? trim($code) : null;
+                    $enriched = $this->catalog->lookupEnrichedForStockWithCandidates($skuRaw, $codeAlt);
                     if (($enriched['source'] ?? '') === 'none') {
                         $stats['rows_skipped_not_found']++;
+                        if ($notFoundHandle !== null) {
+                            fwrite($notFoundHandle, $skuRaw.($code !== '' ? "\t".trim($code) : '')."\n");
+                        }
 
                         continue;
                     }
@@ -144,9 +215,87 @@ class StockCsvEnrichmentService
             }
         } finally {
             fclose($out);
+            if ($notFoundHandle !== null) {
+                fclose($notFoundHandle);
+            }
         }
 
         return $stats;
+    }
+
+    /**
+     * Строки из ранее сохранённого *-enriched.csv: ключ — артикул, значение — полная строка CSV (как в файле).
+     *
+     * @return array<string, list<string|int|float>>
+     */
+    protected function loadResumeRowsBySku(string $absolutePath): array
+    {
+        $handle = fopen($absolutePath, 'rb');
+        if ($handle === false) {
+            return [];
+        }
+
+        $map = [];
+        try {
+            $header = fgetcsv($handle);
+            if ($header === false) {
+                return [];
+            }
+            $header = array_map(fn ($c) => trim((string) $c, " \t\n\r\0\x0B\xEF\xBB\xBF"), $header);
+            $artIdx = array_search(self::SKU_HEADER, $header, true);
+            $srcIdx = array_search(self::SOURCE_HEADER, $header, true);
+            if ($artIdx === false || $srcIdx === false) {
+                return [];
+            }
+
+            while (($row = fgetcsv($handle)) !== false) {
+                $sku = trim((string) ($row[$artIdx] ?? ''));
+                if ($sku === '') {
+                    continue;
+                }
+                $src = strtolower(trim((string) ($row[$srcIdx] ?? '')));
+                if (! in_array($src, ['oem', 'article'], true)) {
+                    continue;
+                }
+                $map[$sku] = $row;
+            }
+        } finally {
+            fclose($handle);
+        }
+
+        return $map;
+    }
+
+    /**
+     * @return array<string, true>
+     */
+    protected function loadSkuSetFromTextFile(string $absolutePath): array
+    {
+        $lines = @file($absolutePath, FILE_IGNORE_NEW_LINES);
+        if ($lines === false) {
+            throw new \RuntimeException("Не удалось прочитать файл списка SKU: {$absolutePath}");
+        }
+
+        $set = [];
+        foreach ($lines as $line) {
+            $line = trim($line);
+            if ($line === '' || str_starts_with($line, '#')) {
+                continue;
+            }
+            $sku = trim(explode("\t", $line, 2)[0]);
+            if ($sku !== '') {
+                $set[$sku] = true;
+            }
+        }
+
+        return $set;
+    }
+
+    protected function defaultNotFoundListPath(string $enrichedCsvPath): string
+    {
+        $base = preg_replace('/\.csv$/iu', '', $enrichedCsvPath);
+
+        return ($base !== null && $base !== '' ? $base : $enrichedCsvPath).'-not-found.txt';
     }
 
     /**

@@ -2,13 +2,17 @@
 
 namespace App\Services;
 
+use Illuminate\Http\Client\Pool;
+use Illuminate\Http\Client\Response;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Str;
 
 /**
  * Клиент RapidAPI «Auto Parts Catalog» — поиск по артикулу/OEM, категория, применимость к авто.
  *
  * На RapidAPI часть маршрутов отдаётся через query string (см. {@see searchByArticleNumber}),
- * для OEM — {@see searchByOemArticleNumber}, {@see getCrossReferencesByOemArticleNumber}, {@see getVehiclesByOemPartNumber}.
+ * для OEM — {@see searchByOemArticleNumber}, {@see getCrossReferencesByOemArticleNumber}, {@see getSelectArticleCrossReferencesByArticleId}, {@see getVehiclesByOemPartNumber}.
  *
  * @see https://rapidapi.com/makingdatameaningful/api/auto-parts-catalog
  */
@@ -17,6 +21,77 @@ class AutoPartsCatalogService
     public function isConfigured(): bool
     {
         return (bool) config('services.auto_parts_catalog.key');
+    }
+
+    /**
+     * Варианты номера для запросов к каталогу: сегмент до «/», полный SKU, без разделителей, только буквы/цифры, колонка «Код» из CSV.
+     *
+     * @return list<string>
+     */
+    public function partNumberSearchCandidates(string $skuRaw, ?string $alternateCode = null): array
+    {
+        $skuRaw = trim($skuRaw);
+        $alternateCode = $alternateCode !== null ? trim($alternateCode) : '';
+
+        $out = [];
+        $push = function (string $s) use (&$out): void {
+            $s = trim($s);
+            if ($s === '') {
+                return;
+            }
+            $s = Str::limit($s, 100, '');
+            if ($s === '') {
+                return;
+            }
+            foreach ($out as $existing) {
+                if ($existing === $s) {
+                    return;
+                }
+            }
+            $out[] = $s;
+        };
+
+        $primary = trim(Str::limit(explode('/', $skuRaw, 2)[0], 100, ''));
+        if ($primary === '') {
+            $primary = Str::limit($skuRaw, 100, '');
+        }
+        $push($primary);
+
+        $full = Str::limit($skuRaw, 100, '');
+        $push($full);
+
+        $push($this->compactPartNumber($primary));
+        $push($this->compactPartNumber($full));
+        $push($this->alnumOnlyPartNumber($primary));
+        $push($this->alnumOnlyPartNumber($full));
+
+        if ($alternateCode !== '') {
+            $push($alternateCode);
+            $push($this->compactPartNumber($alternateCode));
+            $push($this->alnumOnlyPartNumber($alternateCode));
+        }
+
+        $max = max(1, (int) config('remains_stock_import.catalog_search_candidate_limit', 8));
+
+        return array_slice($out, 0, $max);
+    }
+
+    /**
+     * Как {@see lookupEnrichedForStock}, но перебирает кандидатов до первого непустого ответа (меньше «не найдено» из-за формата номера).
+     *
+     * @return array<string, mixed>
+     */
+    public function lookupEnrichedForStockWithCandidates(string $skuRaw, ?string $alternateCode = null): array
+    {
+        $last = $this->emptyEnrichmentPayload();
+        foreach ($this->partNumberSearchCandidates($skuRaw, $alternateCode) as $candidate) {
+            $last = $this->lookupEnrichedForStock($candidate);
+            if (($last['source'] ?? 'none') !== 'none') {
+                return $last;
+            }
+        }
+
+        return $last;
     }
 
     /**
@@ -119,6 +194,20 @@ class AutoPartsCatalogService
     }
 
     /**
+     * Кросс-номера по внутреннему articleId TecDoc (другой маршрут, чем поиск по OEM-строке).
+     * GET /artlookup/select-article-cross-references/article-id/{articleId}/lang-id/{langId}
+     *
+     * @return array<string, mixed>|null
+     */
+    public function getSelectArticleCrossReferencesByArticleId(int $articleId, ?int $langId = null): ?array
+    {
+        $langId ??= (int) config('services.auto_parts_catalog.lang_id');
+        $path = '/artlookup/select-article-cross-references/article-id/'.$articleId.'/lang-id/'.$langId;
+
+        return $this->getJson($path);
+    }
+
+    /**
      * Аналоги других производителей (aftermarket) из кросс-таблицы: бренд + артикул + привязка к OEM.
      *
      * @param  bool  $directOemAnalogsOnly  true — только связь IAM→OEM (без цепочек IAM→OEM→IAM между аналогами)
@@ -132,6 +221,148 @@ class AutoPartsCatalogService
         }
 
         return $this->uniqueAnalogRowsFromCrossReferenceArticles($raw['articles'], $directOemAnalogsOnly);
+    }
+
+    /**
+     * Кроссы из {@see getSelectArticleCrossReferencesByArticleId}: без фильтра только IAM→OEM (полнее список аналогов).
+     *
+     * @return array<int, array{supplierName: string, articleNo: string, crossManufacturerName: string|null, crossNumber: string|null, searchLevel: string}>
+     */
+    public function listAnalogsFromArticleIdCrossReferences(int $articleId): array
+    {
+        $raw = $this->getSelectArticleCrossReferencesByArticleId($articleId);
+
+        return $this->parseArticleIdCrossReferencePayload($raw);
+    }
+
+    /**
+     * @return array<int, array{supplierName: string, articleNo: string, crossManufacturerName: string|null, crossNumber: string|null, searchLevel: string}>
+     */
+    protected function parseArticleIdCrossReferencePayload(?array $raw): array
+    {
+        $articles = $this->extractArticlesArrayFromArtlookupResponse($raw);
+
+        return $this->uniqueAnalogRowsFromCrossReferenceArticles($articles, false);
+    }
+
+    /**
+     * Несколько независимых GET к RapidAPI за один round-trip (уменьшает суммарное время ожидания).
+     *
+     * @param  array<string, string>  $pathsByAlias  alias => path от base_url (например "/articles/...")
+     * @return array<string, array<string, mixed>|null>
+     */
+    protected function rapidApiPoolGet(array $pathsByAlias): array
+    {
+        if ($pathsByAlias === []) {
+            return [];
+        }
+
+        if (! $this->isConfigured()) {
+            throw new \RuntimeException('Задайте RAPIDAPI_AUTO_PARTS_KEY в .env (RapidAPI → Auto Parts Catalog → ключ).');
+        }
+
+        $base = rtrim((string) config('services.auto_parts_catalog.base_url'), '/');
+        $timeout = (int) config('services.auto_parts_catalog.timeout', 30);
+        $headers = [
+            'Accept' => 'application/json',
+            'X-RapidAPI-Key' => (string) config('services.auto_parts_catalog.key'),
+            'X-RapidAPI-Host' => (string) config('services.auto_parts_catalog.host'),
+        ];
+
+        $responses = Http::pool(function (Pool $pool) use ($base, $timeout, $headers, $pathsByAlias) {
+            foreach ($pathsByAlias as $alias => $path) {
+                $pool->as((string) $alias)
+                    ->withHeaders($headers)
+                    ->timeout($timeout)
+                    ->acceptJson()
+                    ->get($base.$path);
+            }
+        });
+
+        $out = [];
+        foreach ($pathsByAlias as $alias => $_) {
+            $response = $responses[(string) $alias] ?? null;
+            if ($response instanceof \Throwable && ! $response instanceof Response) {
+                Log::warning('auto_parts_catalog_pool_http', [
+                    'alias' => $alias,
+                    'exception' => $response::class,
+                    'message' => $response->getMessage(),
+                ]);
+                $out[(string) $alias] = null;
+
+                continue;
+            }
+            if ($response === null || ! $response->successful()) {
+                if ($response instanceof Response) {
+                    Log::warning('auto_parts_catalog_pool_http', [
+                        'alias' => $alias,
+                        'status' => $response->status(),
+                    ]);
+                }
+                $out[(string) $alias] = null;
+
+                continue;
+            }
+            $json = $response->json();
+            $out[(string) $alias] = is_array($json) ? $json : null;
+        }
+
+        return $out;
+    }
+
+    /**
+     * @param  array<string, mixed>|null  $raw
+     * @return array<int, mixed>
+     */
+    protected function extractArticlesArrayFromArtlookupResponse(?array $raw): array
+    {
+        if ($raw === null || $raw === []) {
+            return [];
+        }
+
+        foreach (['articles', 'articleCrossReferences', 'crossReferences', 'data'] as $key) {
+            if (isset($raw[$key]) && is_array($raw[$key])) {
+                $inner = $raw[$key];
+
+                return array_is_list($inner) ? $inner : [];
+            }
+        }
+
+        return array_is_list($raw) ? $raw : [];
+    }
+
+    /**
+     * @param  array<int, array{supplierName: string, articleNo: string, crossManufacturerName: string|null, crossNumber: string|null, searchLevel: string}>  $a
+     * @param  array<int, array{supplierName: string, articleNo: string, crossManufacturerName: string|null, crossNumber: string|null, searchLevel: string}>  $b
+     * @return array<int, array{supplierName: string, articleNo: string, crossManufacturerName: string|null, crossNumber: string|null, searchLevel: string}>
+     */
+    public function mergeUniqueCrossAnalogRows(array $a, array $b): array
+    {
+        $seen = [];
+        $out = [];
+        foreach (array_merge($a, $b) as $row) {
+            if (! is_array($row)) {
+                continue;
+            }
+            $supplier = isset($row['supplierName']) ? (string) $row['supplierName'] : '';
+            $articleNo = isset($row['articleNo']) ? (string) $row['articleNo'] : '';
+            $key = $supplier."\0".$articleNo;
+            if ($supplier === '' || $articleNo === '' || isset($seen[$key])) {
+                continue;
+            }
+            $seen[$key] = true;
+            $out[] = [
+                'supplierName' => $supplier,
+                'articleNo' => $articleNo,
+                'crossManufacturerName' => isset($row['crossManufacturerName']) ? (string) $row['crossManufacturerName'] : null,
+                'crossNumber' => isset($row['crossNumber']) ? (string) $row['crossNumber'] : null,
+                'searchLevel' => isset($row['searchLevel']) ? (string) $row['searchLevel'] : '',
+            ];
+        }
+
+        usort($out, fn (array $x, array $y): int => strcasecmp($x['supplierName'].$x['articleNo'], $y['supplierName'].$y['articleNo']));
+
+        return $out;
     }
 
     /**
@@ -189,8 +420,11 @@ class AutoPartsCatalogService
     }
 
     /**
-     * Список применимости по OEM: марка/модель/модификация и интервалы выпуска.
-     * GET /articles-oem/selecting-a-list-of-cars-for-oem-part-number/type-id/.../manufacturer-id/.../article-oem-no/...
+     * Список применимости по OEM (Get list of vehicles by OEM part number).
+     * GET /articles-oem/selecting-a-list-of-cars-for-oem-part-number/type-id/{typeId}/lang-id/{langId}/country-filter-id/{countryId}/manufacturer-id/{manufacturerId}/article-oem-no/{oem}
+     *
+     * Пример (RapidAPI): …/type-id/1/lang-id/4/country-filter-id/63/manufacturer-id/93/article-oem-no/7700115294
+     * Параметры type-id, lang-id, country-filter-id — из config('services.auto_parts_catalog.*'); manufacturerId — из первой строки {@see searchByOemArticleNumber}.
      *
      * @return array<int, mixed>|null
      */
@@ -209,8 +443,9 @@ class AutoPartsCatalogService
 
     /**
      * Сценарий для OEM-кода: поиск OEM → категория по первому articleId → список авто (нужен manufacturerId из поиска).
+     * После первого запроса (search-by-article-oem-no) независимые GET выполняются параллельно через {@see rapidApiPoolGet} (категория, авто, кроссы по OEM и по article-id).
      *
-     * @param  bool  $includeCrossReferences  второй запрос к artlookup — полный список аналогов aftermarket (IAM→OEM), обычно шире, чем {@see uniqueSuppliersFromOemRows}
+     * @param  bool  $includeCrossReferences  запрос artlookup по OEM-строке; кроссы по article-id подмешиваются при наличии articleId
      * @return array{
      *     oem_search: array<int, mixed>|null,
      *     suppliers: array<int, array{supplierId: int, supplierName: string, articleNo: string|null, articleId: int|null}>,
@@ -235,22 +470,54 @@ class AutoPartsCatalogService
             : null;
 
         $suppliers = $this->uniqueSuppliersFromOemRows($rows);
-        $category = $articleId !== null ? $this->getCategoryByArticleId($articleId) : null;
-        $vehicles = $manufacturerId !== null
-            ? $this->getVehiclesByOemPartNumber($manufacturerId, $articleOemNo)
-            : null;
+
+        $langId = (int) config('services.auto_parts_catalog.lang_id');
+        $typeId = (int) config('services.auto_parts_catalog.vehicle_type_id');
+        $countryId = (int) config('services.auto_parts_catalog.country_filter_id');
+        $oemEnc = rawurlencode($articleOemNo);
+
+        $paths = [];
+        if ($articleId !== null) {
+            $paths['category'] = "/articles/get-article-category/article-id/{$articleId}/lang-id/{$langId}";
+        }
+        if ($manufacturerId !== null) {
+            $paths['vehicles'] = '/articles-oem/selecting-a-list-of-cars-for-oem-part-number'
+                ."/type-id/{$typeId}/lang-id/{$langId}/country-filter-id/{$countryId}"
+                ."/manufacturer-id/{$manufacturerId}/article-oem-no/{$oemEnc}";
+        }
+        if ($includeCrossReferences) {
+            $paths['cross_oem'] = '/artlookup/search-for-analogue-of-spare-parts-by-oem-number/article-oem-no/'.$oemEnc;
+        }
+        if ($articleId !== null) {
+            $paths['cross_aid'] = '/artlookup/select-article-cross-references/article-id/'.$articleId.'/lang-id/'.$langId;
+        }
+
+        $pooled = $this->rapidApiPoolGet($paths);
+
+        $category = isset($pooled['category']) && is_array($pooled['category']) ? $pooled['category'] : null;
+        $vehicles = isset($pooled['vehicles']) && is_array($pooled['vehicles']) ? $pooled['vehicles'] : null;
 
         $crossTotal = null;
         $crossAnalogs = null;
-        if ($includeCrossReferences) {
-            $crossRaw = $this->getCrossReferencesByOemArticleNumber($articleOemNo);
+        $crossRaw = $pooled['cross_oem'] ?? null;
+        if ($includeCrossReferences && is_array($crossRaw)) {
             $crossTotal = isset($crossRaw['countArticles']) && is_numeric($crossRaw['countArticles'])
                 ? (int) $crossRaw['countArticles']
                 : null;
-            $articles = (is_array($crossRaw) && isset($crossRaw['articles']) && is_array($crossRaw['articles']))
+            $articles = (isset($crossRaw['articles']) && is_array($crossRaw['articles']))
                 ? $crossRaw['articles']
                 : [];
             $crossAnalogs = $this->uniqueAnalogRowsFromCrossReferenceArticles($articles, true);
+        } else {
+            $crossAnalogs = [];
+        }
+
+        if ($articleId !== null) {
+            $extraFromArticleId = $this->parseArticleIdCrossReferencePayload($pooled['cross_aid'] ?? null);
+            $crossAnalogs = $this->mergeUniqueCrossAnalogRows(
+                is_array($crossAnalogs) ? $crossAnalogs : [],
+                $extraFromArticleId
+            );
         }
 
         return [
@@ -290,6 +557,97 @@ class AutoPartsCatalogService
             'category' => $category,
             'compatible_vehicles' => null,
         ];
+    }
+
+    /**
+     * URL изображения детали (поле s3image и аналоги в ответах OEM / search-by-article).
+     * Два лёгких запроса максимум — без полного обогащения.
+     */
+    public function resolveCatalogImageUrl(string $articleNo): ?string
+    {
+        $articleNo = trim($articleNo);
+        if ($articleNo === '' || ! $this->isConfigured()) {
+            return null;
+        }
+
+        $oemSearch = $this->searchByOemArticleNumber($articleNo);
+        $oemList = is_array($oemSearch) && array_is_list($oemSearch) ? $oemSearch : [];
+        $url = $this->extractS3ImageUrlFromRows($oemList);
+        if ($url !== null) {
+            return $url;
+        }
+
+        $search = $this->searchByArticleNumber($articleNo);
+        $rows = $this->normalizeSearchRows($search);
+
+        return $this->extractS3ImageUrlFromRows($rows);
+    }
+
+    /**
+     * URL картинки: перебор вариантов номера (как {@see partNumberSearchCandidates}).
+     */
+    public function resolveCatalogImageUrlWithCandidates(string $skuRaw, ?string $alternateCode = null): ?string
+    {
+        foreach ($this->partNumberSearchCandidates($skuRaw, $alternateCode) as $candidate) {
+            $url = $this->resolveCatalogImageUrl($candidate);
+            if ($url !== null && $url !== '') {
+                return $url;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * @param  array<int, mixed>  $rows
+     */
+    public function extractS3ImageUrlFromRows(array $rows): ?string
+    {
+        foreach ($rows as $row) {
+            if (! is_array($row)) {
+                continue;
+            }
+            $url = $this->extractS3ImageUrlFromArticleRow($row);
+            if ($url !== null) {
+                return $url;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * @param  array<string, mixed>  $row
+     */
+    public function extractS3ImageUrlFromArticleRow(array $row, int $depth = 0): ?string
+    {
+        if ($depth > 6) {
+            return null;
+        }
+
+        foreach (['s3image', 's3Image', 's3_image', 'imageUrl', 'imageURL', 'image', 'thumbnailUrl', 'thumbUrl'] as $key) {
+            if (! isset($row[$key])) {
+                continue;
+            }
+            $v = $row[$key];
+            if (is_string($v)) {
+                $v = trim($v);
+                if ($v !== '' && str_starts_with($v, 'http')) {
+                    return $v;
+                }
+            }
+        }
+
+        foreach (['data', 'article', 'articleData', 'media', 'attributes'] as $nest) {
+            if (isset($row[$nest]) && is_array($row[$nest])) {
+                $inner = $this->extractS3ImageUrlFromArticleRow($row[$nest], $depth + 1);
+                if ($inner !== null) {
+                    return $inner;
+                }
+            }
+        }
+
+        return null;
     }
 
     protected function getJson(string $pathOrQuery): ?array
@@ -390,6 +748,7 @@ class AutoPartsCatalogService
      *   vehicles_raw: array<int, mixed>|null,
      *   first_article_id: int|null,
      *   manufacturer_id: int|null,
+     *   catalog_image_url: string,
      * }
      */
     public function lookupEnrichedForStock(string $articleNo): array
@@ -413,6 +772,8 @@ class AutoPartsCatalogService
                 $crossAnalogs = [];
             }
 
+            $imageUrl = $this->extractS3ImageUrlFromRows($oemList);
+
             return [
                 'source' => 'oem',
                 'category_main' => $parts['main'],
@@ -424,16 +785,42 @@ class AutoPartsCatalogService
                 'vehicles_raw' => is_array($vehiclesRaw) ? $vehiclesRaw : null,
                 'first_article_id' => $lookup['first_article_id'] ?? null,
                 'manufacturer_id' => $lookup['manufacturer_id'] ?? null,
+                'catalog_image_url' => $imageUrl ?? '',
             ];
         }
 
         $search = $this->searchByArticleNumber($articleNo);
         $rows = $this->normalizeSearchRows($search);
         $firstId = $this->firstArticleId($rows);
-        $categoryRaw = $firstId !== null ? $this->getCategoryByArticleId($firstId) : null;
+
+        $langId = (int) config('services.auto_parts_catalog.lang_id');
+        $oemEnc = rawurlencode($articleNo);
+        $pathsArticle = [
+            'cross_oem' => '/artlookup/search-for-analogue-of-spare-parts-by-oem-number/article-oem-no/'.$oemEnc,
+        ];
+        if ($firstId !== null) {
+            $pathsArticle['category'] = "/articles/get-article-category/article-id/{$firstId}/lang-id/{$langId}";
+            $pathsArticle['cross_aid'] = '/artlookup/select-article-cross-references/article-id/'.$firstId.'/lang-id/'.$langId;
+        }
+        $pooledArticle = $this->rapidApiPoolGet($pathsArticle);
+
+        $categoryRaw = isset($pooledArticle['category']) && is_array($pooledArticle['category'])
+            ? $pooledArticle['category']
+            : null;
         $parts = $this->splitCategoryLevels($categoryRaw);
         $articleSuppliers = $this->uniqueSuppliersFromOemRows($rows);
-        $crossAnalogs = $this->listAnalogsFromCrossReferences($articleNo, true);
+
+        $crossRawArticle = $pooledArticle['cross_oem'] ?? null;
+        $articlesOem = (is_array($crossRawArticle) && isset($crossRawArticle['articles']) && is_array($crossRawArticle['articles']))
+            ? $crossRawArticle['articles']
+            : [];
+        $crossAnalogs = $this->uniqueAnalogRowsFromCrossReferenceArticles($articlesOem, true);
+        if ($firstId !== null) {
+            $crossAnalogs = $this->mergeUniqueCrossAnalogRows(
+                $crossAnalogs,
+                $this->parseArticleIdCrossReferencePayload($pooledArticle['cross_aid'] ?? null)
+            );
+        }
 
         $hasCategory = $parts['main'] !== '' || $parts['sub'] !== '';
         $hasAnything = $firstId !== null || $hasCategory || $articleSuppliers !== [] || $crossAnalogs !== [];
@@ -441,6 +828,8 @@ class AutoPartsCatalogService
         if (! $hasAnything) {
             return $this->emptyEnrichmentPayload();
         }
+
+        $imageUrl = $this->extractS3ImageUrlFromRows($rows);
 
         return [
             'source' => 'article',
@@ -453,6 +842,7 @@ class AutoPartsCatalogService
             'vehicles_raw' => null,
             'first_article_id' => $firstId,
             'manufacturer_id' => null,
+            'catalog_image_url' => $imageUrl ?? '',
         ];
     }
 
@@ -468,6 +858,7 @@ class AutoPartsCatalogService
      *   vehicles_raw: null,
      *   first_article_id: null,
      *   manufacturer_id: null,
+     *   catalog_image_url: string,
      * }
      */
     protected function emptyEnrichmentPayload(): array
@@ -483,6 +874,7 @@ class AutoPartsCatalogService
             'vehicles_raw' => null,
             'first_article_id' => null,
             'manufacturer_id' => null,
+            'catalog_image_url' => '',
         ];
     }
 
@@ -684,5 +1076,27 @@ class AutoPartsCatalogService
         ]);
 
         return $raw;
+    }
+
+    protected function compactPartNumber(string $s): string
+    {
+        $s = trim($s);
+        if ($s === '') {
+            return '';
+        }
+        $t = preg_replace('/[\s\-_\.\/]+/u', '', $s);
+
+        return Str::limit(is_string($t) ? $t : $s, 100, '');
+    }
+
+    protected function alnumOnlyPartNumber(string $s): string
+    {
+        $s = trim($s);
+        if ($s === '') {
+            return '';
+        }
+        $t = preg_replace('/[^A-Za-z0-9]/u', '', $s);
+
+        return Str::limit(is_string($t) ? $t : '', 100, '');
     }
 }

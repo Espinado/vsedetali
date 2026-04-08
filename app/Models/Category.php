@@ -6,6 +6,7 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Support\Collection;
 
 class Category extends Model
 {
@@ -55,5 +56,33 @@ class Category extends Model
     public function scopeRoots($query)
     {
         return $query->whereNull('parent_id');
+    }
+
+    /**
+     * Цепочка от корня до этой категории (включительно) для хлебных крошек.
+     * Только активные категории; служебные (slug import-*) в цепочку не попадают.
+     */
+    public function ancestorsChainForStorefront(): Collection
+    {
+        $prefix = (string) config('storefront.hidden_category_slug_prefix', 'import-');
+
+        $chain = collect([$this]);
+        $current = $this;
+
+        while ($current->parent_id) {
+            $parent = static::query()
+                ->active()
+                ->whereKey($current->parent_id)
+                ->first();
+
+            if (! $parent || str_starts_with((string) $parent->slug, $prefix)) {
+                break;
+            }
+
+            $chain->prepend($parent);
+            $current = $parent;
+        }
+
+        return $chain;
     }
 }

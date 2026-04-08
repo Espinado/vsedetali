@@ -9,6 +9,7 @@ use App\Models\Vehicle;
 use App\Models\Warehouse;
 use App\Support\VehicleLabelNormalizer;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 
 /**
@@ -24,6 +25,13 @@ class RemainsStockCsvImportService
     /** @var array{standalone: bool, part_brand_id: ?int, vehicles: list<array{make: string, model: ?string}>} */
     private array $context;
 
+    public function __construct(
+        protected CatalogProductImageDownloader $catalogProductImageDownloader,
+        protected CatalogVehicleSyncService $catalogVehicleSyncService,
+        protected CatalogProductMetadataSyncService $catalogProductMetadataSync,
+        protected AutoPartsCatalogService $autoPartsCatalogService,
+    ) {}
+
     /**
      * @return array{
      *   rows: int,
@@ -32,10 +40,21 @@ class RemainsStockCsvImportService
      *   created_products: int,
      *   skipped_existing: int,
      *   created_vehicles: int,
-     *   attached_vehicles: int
+     *   attached_vehicles: int,
+     *   catalog_images_attached: int,
+     *   catalog_images_failed: int,
+     *   catalog_images_no_url: int,
+     *   catalog_images_no_api: int,
+     *   catalog_vehicles_attached: int,
+     *   catalog_enrichment_failed: int,
+     *   catalog_primary_oem_added: int,
+     *   catalog_metadata_oem_extra: int,
+     *   catalog_metadata_cross: int,
+     *   catalog_metadata_attributes: int,
+     *   catalog_storefront_categories: int,
      * }
      */
-    public function import(string $absolutePath, bool $dryRun = false): array
+    public function import(string $absolutePath, bool $dryRun = false, ?bool $downloadCatalogImages = null): array
     {
         if (! is_readable($absolutePath)) {
             throw new \InvalidArgumentException("Файл недоступен: {$absolutePath}");
@@ -49,7 +68,25 @@ class RemainsStockCsvImportService
             'skipped_existing' => 0,
             'created_vehicles' => 0,
             'attached_vehicles' => 0,
+            'catalog_images_attached' => 0,
+            'catalog_images_failed' => 0,
+            'catalog_images_no_url' => 0,
+            'catalog_images_no_api' => 0,
+            'catalog_vehicles_attached' => 0,
+            'catalog_enrichment_failed' => 0,
+            'catalog_primary_oem_added' => 0,
+            'catalog_metadata_oem_extra' => 0,
+            'catalog_metadata_cross' => 0,
+            'catalog_metadata_attributes' => 0,
+            'catalog_storefront_categories' => 0,
         ];
+
+        $downloadImages = $downloadCatalogImages ?? (bool) config('remains_stock_import.download_catalog_images', true);
+        $syncCatalogVehicles = (bool) config('remains_stock_import.sync_catalog_vehicles', false);
+        if ($dryRun) {
+            $downloadImages = false;
+            $syncCatalogVehicles = false;
+        }
 
         $this->context = [
             'standalone' => true,
@@ -117,8 +154,11 @@ class RemainsStockCsvImportService
                 continue;
             }
 
+            $createdProduct = null;
+
             DB::transaction(function () use (
                 &$stats,
+                &$createdProduct,
                 $warehouse,
                 $sku,
                 $code,
@@ -162,12 +202,18 @@ class RemainsStockCsvImportService
                 $stats['created_products']++;
                 $stats['imported']++;
 
+                if ($this->catalogProductMetadataSync->ensurePrimaryOemFromSku($product)) {
+                    $stats['catalog_primary_oem_added']++;
+                }
+
                 foreach ($this->context['vehicles'] as $vm) {
-                    $modelVal = $vm['model'] ?? '';
+                    $modelRaw = trim((string) ($vm['model'] ?? ''));
+                    $defaultModel = (string) config('remains_stock_import.default_model_when_missing', 'Общее');
+                    $modelVal = $modelRaw !== '' ? $modelRaw : $defaultModel;
                     $vehicle = Vehicle::query()->firstOrCreate(
                         [
                             'make' => $vm['make'],
-                            'model' => $modelVal !== '' ? $modelVal : '',
+                            'model' => $modelVal,
                             'generation' => null,
                         ],
                         [
@@ -200,7 +246,89 @@ class RemainsStockCsvImportService
                         'days_in_warehouse' => $days,
                     ]
                 );
+
+                $createdProduct = $product;
             });
+
+            if ($createdProduct !== null) {
+                $codeForCatalog = trim($code) !== '' ? trim($code) : null;
+
+                $ranCatalogExtra = false;
+
+                if ($syncCatalogVehicles && $this->autoPartsCatalogService->isConfigured()) {
+                    $ranCatalogExtra = true;
+                    try {
+                        $enriched = $this->autoPartsCatalogService->lookupEnrichedForStockWithCandidates($sku, $codeForCatalog);
+                        $stats['catalog_vehicles_attached'] += $this->catalogVehicleSyncService->attachFromEnrichment(
+                            $createdProduct->fresh(),
+                            $enriched
+                        );
+
+                        $meta = $this->catalogProductMetadataSync->syncFromEnrichment($createdProduct->fresh(), $enriched);
+                        $stats['catalog_metadata_oem_extra'] += $meta['oem_added'];
+                        $stats['catalog_metadata_cross'] += $meta['cross_added'];
+                        $stats['catalog_metadata_attributes'] += $meta['attributes_upserted'];
+
+                        if ($this->catalogProductMetadataSync->assignStorefrontCategoryFromEnrichment($createdProduct->fresh(), $enriched)) {
+                            $stats['catalog_storefront_categories']++;
+                        }
+
+                        if ($downloadImages && ! $createdProduct->fresh()->images()->exists()) {
+                            $url = trim((string) ($enriched['catalog_image_url'] ?? ''));
+                            if ($url !== '') {
+                                if ($this->catalogProductImageDownloader->downloadAndAttach($createdProduct->fresh(), $url)) {
+                                    $stats['catalog_images_attached']++;
+                                } else {
+                                    $stats['catalog_images_failed']++;
+                                }
+                            } else {
+                                $stats['catalog_images_no_url']++;
+                            }
+                        }
+                    } catch (\Throwable $e) {
+                        $stats['catalog_enrichment_failed']++;
+                        Log::warning('remains_import_catalog_enrichment', [
+                            'sku' => $sku,
+                            'product_id' => $createdProduct->id,
+                            'message' => $e->getMessage(),
+                        ]);
+                    }
+                } elseif ($downloadImages) {
+                    $ranCatalogExtra = true;
+                    try {
+                        $imgResult = $this->catalogProductImageDownloader->attachFromSkuRawIfConfigured(
+                            $createdProduct,
+                            $sku,
+                            $codeForCatalog
+                        );
+                    } catch (\Throwable $e) {
+                        $stats['catalog_images_failed']++;
+                        Log::warning('remains_import_catalog_image', [
+                            'sku' => $sku,
+                            'product_id' => $createdProduct->id,
+                            'message' => $e->getMessage(),
+                        ]);
+                        $imgResult = null;
+                    }
+
+                    if (isset($imgResult)) {
+                        match ($imgResult) {
+                            'attached' => $stats['catalog_images_attached']++,
+                            'download_failed', 'api_error' => $stats['catalog_images_failed']++,
+                            'no_url' => $stats['catalog_images_no_url']++,
+                            'no_api' => $stats['catalog_images_no_api']++,
+                            'has_images' => null,
+                        };
+                    }
+                }
+
+                if ($ranCatalogExtra) {
+                    $sleepMs = max(0, (int) config('remains_stock_import.catalog_image_sleep_ms', 80));
+                    if ($sleepMs > 0) {
+                        usleep($sleepMs * 1000);
+                    }
+                }
+            }
         }
 
         return $stats;

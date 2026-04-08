@@ -9,9 +9,22 @@ class HeaderSearch extends Component
 {
     public string $query = '';
 
+    /** Показывать выпадающий список подсказок (скрывается после перехода по ссылке). */
+    public bool $resultsPanelOpen = true;
+
     public function mount(): void
     {
         $this->query = (string) request('search', '');
+    }
+
+    public function updatedQuery(): void
+    {
+        $this->resultsPanelOpen = true;
+    }
+
+    public function closeResultsPanel(): void
+    {
+        $this->resultsPanelOpen = false;
     }
 
     public function getResultsProperty()
@@ -33,7 +46,8 @@ class HeaderSearch extends Component
                         $q->where('oem_number', 'like', $like);
                     })
                     ->orWhereHas('crossNumbers', function ($q) use ($like) {
-                        $q->where('cross_number', 'like', $like);
+                        $q->where('cross_number', 'like', $like)
+                            ->orWhere('manufacturer_name', 'like', $like);
                     });
             })
             ->orderBy('name')
@@ -43,6 +57,8 @@ class HeaderSearch extends Component
 
     public function search(): void
     {
+        $this->closeResultsPanel();
+
         $term = trim($this->query);
 
         if ($term === '') {
@@ -57,6 +73,7 @@ class HeaderSearch extends Component
     public function clearSearch(): void
     {
         $this->query = '';
+        $this->resultsPanelOpen = true;
     }
 
     public function render()

@@ -9,3 +9,17 @@
     --font-sans: 'Instrument Sans', ui-sans-serif, system-ui, sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji',
         'Segoe UI Symbol', 'Noto Color Emoji';
 }
+
+/* Аккордеон сайдбара каталога (<details>) */
+@layer components {
+    .sidebar-accordion > summary {
+        list-style: none;
+    }
+    .sidebar-accordion > summary::-webkit-details-marker {
+        display: none;
+    }
+    /* Только шеврон в summary этого же <details>, не вложенных аккордеонов */
+    .sidebar-accordion[open] > summary .sidebar-accordion-chevron {
+        @apply rotate-180;
+    }
+}

@@ -55,4 +55,42 @@ class Vehicle extends Model
     {
         return $query->where('year_from', '<=', $year)->where('year_to', '>=', $year);
     }
+
+    /**
+     * Краткая строка для карточки товара: «BMW X5 (2010–2020), универсал, 2.0 TDI».
+     */
+    public function shortCompatibilityLabel(): string
+    {
+        $parts = array_filter([
+            trim((string) $this->make),
+            trim((string) $this->model),
+        ], fn (string $s) => $s !== '');
+        $name = implode(' ', $parts);
+        if ($this->generation !== null && trim((string) $this->generation) !== '') {
+            $name = trim($name.' '.trim((string) $this->generation));
+        }
+        if ($name === '') {
+            return '';
+        }
+        if ($this->year_from !== null || $this->year_to !== null) {
+            $y1 = $this->year_from ?? '…';
+            $y2 = $this->year_to ?? '…';
+            $name .= ' ('.$y1.'–'.$y2.')';
+        }
+
+        $detailParts = array_values(array_filter([
+            $this->body_type !== null && trim((string) $this->body_type) !== ''
+                ? trim((string) $this->body_type)
+                : null,
+            $this->engine !== null && trim((string) $this->engine) !== ''
+                ? trim((string) $this->engine)
+                : null,
+        ]));
+
+        if ($detailParts !== []) {
+            $name .= ', '.implode(', ', $detailParts);
+        }
+
+        return $name;
+    }
 }

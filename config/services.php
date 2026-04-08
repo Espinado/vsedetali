@@ -48,7 +48,7 @@ return [
         /** Регион/фильтр страны: из GET /countries/list или list-countries-by-lang-id */
         /** Пример: 63 (DE в выборках TecDoc); подберите id из /countries/list-countries-by-lang-id/{langId} */
         'country_filter_id' => (int) env('RAPIDAPI_AUTO_PARTS_COUNTRY_FILTER_ID', 63),
-        /** Тип ТС: из GET /types/list-vehicles-type (часто 1 — легковые) */
+        /** Тип ТС: из GET /types/list-vehicles-type (часто 1 — легковые). Используется в т.ч. в selecting-a-list-of-cars-for-oem-part-number */
         'vehicle_type_id' => (int) env('RAPIDAPI_AUTO_PARTS_VEHICLE_TYPE_ID', 1),
         'timeout' => (int) env('RAPIDAPI_AUTO_PARTS_TIMEOUT', 30),
     ],

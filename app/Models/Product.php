@@ -2,6 +2,8 @@
 
 namespace App\Models;
 
+use App\Support\ProductNameVehicleExtractor;
+use App\Support\VehicleLabelNormalizer;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -102,6 +104,156 @@ class Product extends Model
     public function scopeByBrand($query, $brandId)
     {
         return $query->where('brand_id', $brandId);
+    }
+
+    /**
+     * Поиск товара по номеру детали (SKU): точное совпадение или без пробелов/дефисов.
+     */
+    public function scopeWhereSkuMatchesPartNumber($query, string $partNumber): void
+    {
+        $trim = trim($partNumber);
+        if ($trim === '') {
+            $query->whereRaw('0 = 1');
+
+            return;
+        }
+        $compact = preg_replace('/[\s\-_\/\.]/u', '', $trim);
+        $query->where(function ($q) use ($trim, $compact) {
+            $q->where('sku', $trim);
+            if ($compact !== '') {
+                $q->orWhereRaw(
+                    'REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(sku, \' \', \'\'), \'-\', \'\'), \'_\', \'\'), \'/\', \'\'), \'.\', \'\') = ?',
+                    [$compact]
+                );
+            }
+        });
+    }
+
+    /**
+     * Кросс-номера, по которым в каталоге есть другой товар (совпадение SKU). Без карточки — не попадают в выдачу.
+     *
+     * @return \Illuminate\Support\Collection<int, object{cross: \App\Models\ProductCrossNumber, linked: \App\Models\Product}>
+     */
+    public function crossNumbersWithLinkedProducts(): \Illuminate\Support\Collection
+    {
+        return $this->crossNumbers
+            ->map(function (ProductCrossNumber $cn) {
+                $linked = static::query()
+                    ->where('is_active', true)
+                    ->where('id', '!=', $this->id)
+                    ->whereSkuMatchesPartNumber($cn->cross_number)
+                    ->first();
+
+                if ($linked === null) {
+                    return null;
+                }
+
+                return (object) ['cross' => $cn, 'linked' => $linked];
+            })
+            ->filter()
+            ->values();
+    }
+
+    /**
+     * Подписи «Совместимость» для сетки каталога: без placeholder «Общее»;
+     * если в БД только общая марка — берём модель из названия товара (после марки).
+     * Если модель из названия не извлекается — строку не показываем (даже марку).
+     *
+     * @return list<string>
+     */
+    public function compatibilityLabelsForStorefrontCard(int $limit = 2): array
+    {
+        if (! $this->relationLoaded('vehicles')) {
+            $this->load('vehicles');
+        }
+
+        $out = [];
+
+        foreach ($this->vehicles as $v) {
+            if (count($out) >= $limit) {
+                break;
+            }
+            $make = trim((string) $v->make);
+            if ($make === '') {
+                continue;
+            }
+            $model = trim((string) $v->model);
+            $isPlaceholder = ProductNameVehicleExtractor::isPlaceholderVehicleModel($model);
+
+            if ($isPlaceholder) {
+                $tail = ProductNameVehicleExtractor::tailAfterMake((string) $this->name, $make);
+                if ($tail === null || $tail === '') {
+                    continue;
+                }
+                $out[] = VehicleLabelNormalizer::title(trim($make.' '.$tail));
+            } else {
+                $out[] = trim($make.' '.$model);
+            }
+        }
+
+        if ($out === [] && trim((string) $this->name) !== '' && $this->vehicles->isEmpty()) {
+            $hit = ProductNameVehicleExtractor::firstMakeAndTailFromName((string) $this->name);
+            if ($hit !== null) {
+                $out[] = VehicleLabelNormalizer::title(trim($hit['make'].' '.$hit['tail']));
+            }
+        }
+
+        return $out;
+    }
+
+    /**
+     * Полная строка совместимости (как {@see Vehicle::shortCompatibilityLabel}, но без «Общее» и с угадыванием модели из названия товара).
+     * Для placeholder «Общее» без модели в названии — пустая строка (марку не показываем).
+     */
+    public function vehicleCompatibilityLineForStorefront(Vehicle $vehicle): string
+    {
+        $make = trim((string) $vehicle->make);
+        $model = trim((string) $vehicle->model);
+        if ($make === '') {
+            return '';
+        }
+
+        $isPlaceholder = ProductNameVehicleExtractor::isPlaceholderVehicleModel($model);
+
+        if ($isPlaceholder) {
+            $tail = ProductNameVehicleExtractor::tailAfterMake((string) $this->name, $make);
+            if ($tail !== null && $tail !== '') {
+                $name = trim($make.' '.$tail);
+            } else {
+                $hit = ProductNameVehicleExtractor::firstMakeAndTailFromName((string) $this->name);
+                if ($hit !== null && mb_strtolower($hit['make']) === mb_strtolower($make)) {
+                    $name = trim($make.' '.$hit['tail']);
+                } else {
+                    return '';
+                }
+            }
+        } else {
+            $name = trim($make.' '.$model);
+            if ($vehicle->generation !== null && trim((string) $vehicle->generation) !== '') {
+                $name = trim($name.' '.trim((string) $vehicle->generation));
+            }
+        }
+
+        if ($vehicle->year_from !== null || $vehicle->year_to !== null) {
+            $y1 = $vehicle->year_from ?? '…';
+            $y2 = $vehicle->year_to ?? '…';
+            $name .= ' ('.$y1.'–'.$y2.')';
+        }
+
+        $detailParts = array_values(array_filter([
+            $vehicle->body_type !== null && trim((string) $vehicle->body_type) !== ''
+                ? trim((string) $vehicle->body_type)
+                : null,
+            $vehicle->engine !== null && trim((string) $vehicle->engine) !== ''
+                ? trim((string) $vehicle->engine)
+                : null,
+        ]));
+
+        if ($detailParts !== []) {
+            $name .= ', '.implode(', ', $detailParts);
+        }
+
+        return $name;
     }
 
     public function getMainImageAttribute(): ?ProductImage
