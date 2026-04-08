@@ -5,6 +5,14 @@
     "description": "Интернет-магазин автозапчастей vsedetalki.",
     "keywords": ["laravel", "framework"],
     "license": "MIT",
+    "conflict": {
+        "symfony/clock": ">=8",
+        "symfony/css-selector": ">=8",
+        "symfony/event-dispatcher": ">=8",
+        "symfony/string": ">=8",
+        "symfony/translation": ">=8",
+        "symfony/yaml": ">=8"
+    },
     "require": {
         "php": "^8.2",
         "filament/filament": "^3.2",
@@ -85,6 +93,9 @@
         "optimize-autoloader": true,
         "preferred-install": "dist",
         "sort-packages": true,
+        "platform": {
+            "php": "8.3.20"
+        },
         "allow-plugins": {
             "pestphp/pest-plugin": true,
             "php-http/discovery": true
