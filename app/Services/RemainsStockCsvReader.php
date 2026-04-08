@@ -8,6 +8,18 @@ namespace App\Services;
 final class RemainsStockCsvReader
 {
     /**
+     * @return array<int, string>|false
+     */
+    private static function readCsvRow($handle, string $delimiter): array|false
+    {
+        if (PHP_VERSION_ID >= 80400) {
+            return fgetcsv($handle, 0, $delimiter, '"', '');
+        }
+
+        return fgetcsv($handle, 0, $delimiter, '"');
+    }
+
+    /**
      * Разобранная строка заголовка таблицы (колонки «Код», «Артикул», …).
      *
      * @return list<string>
@@ -37,7 +49,7 @@ final class RemainsStockCsvReader
             rewind($handle);
             fseek($handle, $afterHeaderBytePos);
 
-            while (($row = fgetcsv($handle, 0, $delimiter, '"')) !== false) {
+            while (($row = self::readCsvRow($handle, $delimiter)) !== false) {
                 $row = array_map(
                     fn ($c) => self::normalizeUtf8String(trim((string) ($c ?? ''), " \t\n\r\0\x0B\xEF\xBB\xBF")),
                     $row
@@ -61,7 +73,8 @@ final class RemainsStockCsvReader
             throw new \RuntimeException('Не удалось прочитать файл.');
         }
 
-        $content = self::normalizeFileContentString($raw);
+        $asUtf8 = self::convertFileBytesToUtf8Text($raw);
+        $content = self::normalizeFileContentString($asUtf8);
         $meta = self::locateHeaderInNormalizedContent($content);
 
         if ($meta === null) {
@@ -75,8 +88,9 @@ final class RemainsStockCsvReader
         if ($meta === null) {
             throw new \RuntimeException(
                 'После разбора CSV не найдена строка заголовка с «Код» и «Артикул». '.
-                'Сохраните файл как CSV UTF-8 или CSV с разделителем «;»/«,» и колонками «Код», «Артикул». '.
-                'Если перенос строки внутри ячейки «Сумма / себестоимости» — пересохраните из Excel в UTF-8.'
+                'Сохраните как «CSV UTF-8» или «CSV (разделители — запятые)» в Excel / LibreOffice. '.
+                'Поддерживаются разделители запятая, точка с запятой и табуляция. '.
+                'Если файл в UTF-16 — сохраните как UTF-8.'
             );
         }
 
@@ -95,7 +109,7 @@ final class RemainsStockCsvReader
      */
     private static function locateHeaderInNormalizedContent(string $content): ?array
     {
-        foreach ([',', ';'] as $delimiter) {
+        foreach ([',', ';', "\t"] as $delimiter) {
             $h = fopen('php://temp', 'r+b');
             if ($h === false) {
                 continue;
@@ -103,11 +117,8 @@ final class RemainsStockCsvReader
             fwrite($h, $content);
             rewind($h);
 
-            while (($row = fgetcsv($h, 0, $delimiter, '"')) !== false) {
-                $normalized = array_map(
-                    fn ($c) => self::normalizeUtf8String(trim((string) ($c ?? ''), " \t\n\r\0\x0B\xEF\xBB\xBF")),
-                    $row
-                );
+            while (($row = self::readCsvRow($h, $delimiter)) !== false) {
+                $normalized = array_map(fn ($c) => self::normalizeCsvHeaderCell($c), $row);
                 if (self::parsedRowIsRemainsTableHeader($normalized)) {
                     $after = ftell($h);
                     fclose($h);
@@ -134,15 +145,55 @@ final class RemainsStockCsvReader
         $hasKod = false;
         $hasArtikul = false;
         foreach ($cells as $cell) {
-            if ($cell === 'Код') {
+            $lc = mb_strtolower($cell, 'UTF-8');
+            if ($lc === 'код') {
                 $hasKod = true;
             }
-            if ($cell === 'Артикул') {
+            if ($lc === 'артикул') {
                 $hasArtikul = true;
             }
         }
 
         return $hasKod && $hasArtikul;
+    }
+
+    /**
+     * BOM / UTF-16: Excel часто отдаёт «Unicode CSV» как UTF-16LE.
+     */
+    private static function convertFileBytesToUtf8Text(string $bytes): string
+    {
+        if ($bytes === '') {
+            return $bytes;
+        }
+
+        if (str_starts_with($bytes, "\xFF\xFE")) {
+            $body = substr($bytes, 2);
+            $out = @mb_convert_encoding($body, 'UTF-8', 'UTF-16LE');
+
+            return $out !== false ? $out : $bytes;
+        }
+
+        if (str_starts_with($bytes, "\xFE\xFF")) {
+            $body = substr($bytes, 2);
+            $out = @mb_convert_encoding($body, 'UTF-8', 'UTF-16BE');
+
+            return $out !== false ? $out : $bytes;
+        }
+
+        if (str_starts_with($bytes, "\xEF\xBB\xBF")) {
+            return substr($bytes, 3);
+        }
+
+        return $bytes;
+    }
+
+    private static function normalizeCsvHeaderCell(mixed $c): string
+    {
+        $s = self::normalizeUtf8String(trim((string) ($c ?? ''), " \t\n\r\0\x0B\xEF\xBB\xBF"));
+        $s = str_replace("\xC2\xA0", ' ', $s);
+        $s = preg_replace('/[\x{200B}\x{FEFF}]/u', '', $s) ?? $s;
+
+        return trim($s);
     }
 
     private static function normalizeFileContentString(string $bytes): string
@@ -170,6 +221,10 @@ final class RemainsStockCsvReader
 
     private static function tryDecodeAsCp1251ThenNormalize(string $raw): ?string
     {
+        if (str_starts_with($raw, "\xFF\xFE") || str_starts_with($raw, "\xFE\xFF")) {
+            return null;
+        }
+
         if (str_starts_with($raw, "\xEF\xBB\xBF")) {
             $raw = substr($raw, 3);
         }
