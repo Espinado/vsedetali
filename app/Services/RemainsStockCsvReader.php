@@ -145,45 +145,73 @@ final class RemainsStockCsvReader
      */
     private static function locateHeaderByUtf8MarkerLine(string $content): ?array
     {
-        $pairs = [
+        $regexAttempts = [
+            [',', '/,\s*Код\s*,\s*Артикул\s*,/u'],
+            [';', '/;\s*Код\s*;\s*Артикул\s*;/u'],
+            ["\t", '/\t\s*Код\s*\t\s*Артикул\s*\t/u'],
+        ];
+
+        foreach ($regexAttempts as [$delimiter, $pattern]) {
+            if (preg_match($pattern, $content, $m, PREG_OFFSET_CAPTURE) !== 1) {
+                continue;
+            }
+
+            $meta = self::extractHeaderLineMetaFromMatch($content, (int) $m[0][1], $delimiter);
+            if ($meta !== null) {
+                return $meta;
+            }
+        }
+
+        $byteNeedles = [
             [',', "\x2C\xD0\x9A\xD0\xBE\xD0\xB4\x2C\xD0\x90\xD1\x80\xD1\x82\xD0\xB8\xD0\xBA\xD1\x83\xD0\xBB\x2C"],
             [';', "\x3B\xD0\x9A\xD0\xBE\xD0\xB4\x3B\xD0\x90\xD1\x80\xD1\x82\xD0\xB8\xD0\xBA\xD1\x83\xD0\xBB\x3B"],
             ["\t", "\x09\xD0\x9A\xD0\xBE\xD0\xB4\x09\xD0\x90\xD1\x80\xD1\x82\xD0\xB8\xD0\xBA\xD1\x83\xD0\xBB\x09"],
         ];
 
-        foreach ($pairs as [$delimiter, $needle]) {
+        foreach ($byteNeedles as [$delimiter, $needle]) {
             $pos = strpos($content, $needle);
             if ($pos === false) {
                 continue;
             }
 
-            $lineStart = strrpos(substr($content, 0, $pos), "\n");
-            $lineStart = $lineStart === false ? 0 : $lineStart + 1;
-            $lineEnd = strpos($content, "\n", $pos);
-            $line = $lineEnd === false
-                ? substr($content, $lineStart)
-                : substr($content, $lineStart, $lineEnd - $lineStart);
-
-            $row = self::strGetCsvRow($line, $delimiter);
-            if ($row === []) {
-                continue;
+            $meta = self::extractHeaderLineMetaFromMatch($content, $pos, $delimiter);
+            if ($meta !== null) {
+                return $meta;
             }
-
-            $normalized = array_map(fn ($c) => self::normalizeCsvHeaderCell($c), $row);
-            if (! self::parsedRowIsRemainsTableHeader($normalized)) {
-                continue;
-            }
-
-            $afterBytePos = $lineEnd === false ? strlen($content) : $lineEnd + 1;
-
-            return [
-                'delimiter' => $delimiter,
-                'after_byte_pos' => $afterBytePos,
-                'header' => $normalized,
-            ];
         }
 
         return null;
+    }
+
+    /**
+     * @return array{delimiter: string, after_byte_pos: int, header: list<string>}|null
+     */
+    private static function extractHeaderLineMetaFromMatch(string $content, int $matchBytePos, string $delimiter): ?array
+    {
+        $lineStart = strrpos(substr($content, 0, $matchBytePos), "\n");
+        $lineStart = $lineStart === false ? 0 : $lineStart + 1;
+        $lineEnd = strpos($content, "\n", $matchBytePos);
+        $line = $lineEnd === false
+            ? substr($content, $lineStart)
+            : substr($content, $lineStart, $lineEnd - $lineStart);
+
+        $row = self::strGetCsvRow($line, $delimiter);
+        if ($row === []) {
+            return null;
+        }
+
+        $normalized = array_map(fn ($c) => self::normalizeCsvHeaderCell($c), $row);
+        if (! self::parsedRowIsRemainsTableHeader($normalized)) {
+            return null;
+        }
+
+        $afterBytePos = $lineEnd === false ? strlen($content) : $lineEnd + 1;
+
+        return [
+            'delimiter' => $delimiter,
+            'after_byte_pos' => $afterBytePos,
+            'header' => $normalized,
+        ];
     }
 
     /**

@@ -18,7 +18,7 @@ class ImportRemainsStockCommand extends Command
 
     public function handle(RemainsStockCsvImportService $service, AutoPartsCatalogService $catalog): int
     {
-        $rawPath = $this->argument('path');
+        $rawPath = trim((string) $this->argument('path'), " \t\n\r\0\x0B\xC2\xA0");
         $path = str_starts_with($rawPath, '/') || (strlen($rawPath) > 2 && ctype_alpha($rawPath[0]) && $rawPath[1] === ':')
             ? $rawPath
             : base_path(trim($rawPath, '/\\'));
