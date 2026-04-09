@@ -76,67 +76,20 @@ final class RemainsStockCsvReader
             throw new \RuntimeException('Не удалось прочитать файл.');
         }
 
-        if ($csvEncoding === 'cp1251') {
-            if (str_starts_with($raw, "\xEF\xBB\xBF")) {
-                $raw = substr($raw, 3);
-            }
-            $converted = @mb_convert_encoding($raw, 'UTF-8', 'Windows-1251');
-            if (! is_string($converted) || $converted === '') {
-                throw new \RuntimeException(
-                    'Режим --encoding=cp1251: не удалось перекодировать файл из Windows-1251 в UTF-8.'
-                );
-            }
-            $asUtf8 = $converted;
-        } else {
-            $asUtf8 = self::convertFileBytesToUtf8Text($raw);
-        }
-        $preCollapse = self::preCollapseNormalize($asUtf8);
-        $content = self::normalizeFileContentString($asUtf8);
+        $result = self::resolveHeaderMetaWithEncodingStrategies($raw, $csvEncoding);
 
-        $meta = self::locateHeaderByPhysicalLineScan($content)
-            ?? self::locateHeaderByUtf8MarkerLine($content)
-            ?? self::locateHeaderByScanningFgetcsv($content, 12_000);
-
-        if ($meta === null) {
-            $meta = self::locateHeaderByPhysicalLineScan($preCollapse)
-                ?? self::locateHeaderByUtf8MarkerLine($preCollapse)
-                ?? self::locateHeaderByScanningFgetcsv($preCollapse, 12_000);
-            if ($meta !== null) {
-                if (isset($meta['_header_physical_line'])) {
-                    $meta = self::relocateHeaderMetaUsingPhysicalLine($content, $meta)
-                        ?? self::locateHeaderByPhysicalLineScan($content)
-                        ?? self::locateHeaderByUtf8MarkerLine($content)
-                        ?? self::locateHeaderByScanningFgetcsv($content, 12_000);
-                } else {
-                    $pos = $meta['after_byte_pos'];
-                    $prefixOk = $pos <= strlen($preCollapse) && $pos <= strlen($content)
-                        && substr($preCollapse, 0, $pos) === substr($content, 0, $pos);
-                    if (! $prefixOk) {
-                        $meta = self::locateHeaderByPhysicalLineScan($content)
-                            ?? self::locateHeaderByScanningFgetcsv($content, 12_000)
-                            ?? $meta;
-                    }
-                }
-            }
-        }
-
-        if ($meta === null && $csvEncoding !== 'cp1251' && $csvEncoding !== 'utf-8') {
-            $cp1251 = self::tryDecodeAsCp1251ThenNormalize($raw);
-            if ($cp1251 !== null) {
-                $content = $cp1251;
-                $meta = self::locateHeaderInNormalizedContent($content);
-            }
-        }
-
-        if ($meta === null) {
+        if ($result === null) {
             throw new \RuntimeException(
-                'После разбора CSV не найдена строка заголовка с «Код» и «Артикул». '.
-                'Сохраните как «CSV UTF-8 (разделители — запятые)» в Excel / LibreOffice. '.
-                'Поддерживаются разделители запятая, точка с запятой и табуляция. '.
-                'Если файл в кодировке Windows-1251 (часто «CSV разделители — точка с запятой»), выполните команду с опцией --encoding=cp1251. '.
-                'Если файл в UTF-16 — сохраните как UTF-8.'
+                'После разбора CSV не найдена строка заголовка с колонками «Код» и «Артикул» '.
+                '(или эквивалентами: Code, Article, Part number и т.п.). '.
+                'Сохраните как «CSV UTF-8» в Excel / LibreOffice. '.
+                'Поддерживаются разделители: запятая, точка с запятой, табуляция, вертикальная черта. '.
+                'Попробуйте без --encoding, с --encoding=cp1251 или с --encoding=utf-8. '.
+                'Если сверху таблицы много служебных строк — убедитесь, что в одной строке есть оба заголовка.'
             );
         }
+
+        ['content' => $content, 'meta' => $meta] = $result;
 
         $handle = fopen('php://temp', 'r+b');
         if ($handle === false) {
@@ -148,6 +101,126 @@ final class RemainsStockCsvReader
         unset($meta['_header_physical_line']);
 
         return [$handle, $meta['delimiter'], $content, $meta['after_byte_pos'], $meta['header']];
+    }
+
+    /**
+     * Несколько стратегий: UTF-8/UTF-16 из байтов, затем cp1251; при явном --encoding сначала выбранная, затем запасная.
+     *
+     * @return array{content: string, meta: array{delimiter: string, after_byte_pos: int, header: list<string>, _header_physical_line?: string}}|null
+     */
+    private static function resolveHeaderMetaWithEncodingStrategies(string $raw, ?string $csvEncoding): ?array
+    {
+        $attemptUtf = static fn (): string => self::convertFileBytesToUtf8Text($raw);
+
+        $attemptCp1251 = static function () use ($raw): string {
+            $t = self::tryDecodeRawBytesToUtf8Cp1251($raw);
+            if ($t === null) {
+                throw new \RuntimeException('cp1251 decode skipped');
+            }
+
+            return $t;
+        };
+
+        $chains = match ($csvEncoding) {
+            'cp1251' => [
+                ['cp1251', $attemptCp1251],
+                ['utf8', $attemptUtf],
+            ],
+            'utf-8' => [
+                ['utf8', $attemptUtf],
+                ['cp1251', $attemptCp1251],
+            ],
+            default => [
+                ['utf8', $attemptUtf],
+                ['cp1251', $attemptCp1251],
+            ],
+        };
+
+        foreach ($chains as [, $getUtf]) {
+            try {
+                $asUtf8 = $getUtf();
+            } catch (\Throwable) {
+                continue;
+            }
+            $found = self::findHeaderMetaAfterNormalize($asUtf8);
+            if ($found !== null) {
+                return $found;
+            }
+        }
+
+        if ($csvEncoding === null) {
+            $cp1251Norm = self::tryDecodeAsCp1251ThenNormalize($raw);
+            if ($cp1251Norm !== null) {
+                $meta = self::locateHeaderInNormalizedContent($cp1251Norm);
+                if ($meta !== null) {
+                    return ['content' => $cp1251Norm, 'meta' => $meta];
+                }
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * @return array{content: string, meta: array{delimiter: string, after_byte_pos: int, header: list<string>, _header_physical_line?: string}}|null
+     */
+    private static function findHeaderMetaAfterNormalize(string $asUtf8): ?array
+    {
+        $preCollapse = self::preCollapseNormalize($asUtf8);
+        $content = self::normalizeFileContentString($asUtf8);
+
+        $meta = self::locateHeaderByPhysicalLineScan($content)
+            ?? self::locateHeaderByUtf8MarkerLine($content)
+            ?? self::locateHeaderByScanningFgetcsv($content, 50_000);
+
+        if ($meta === null) {
+            $meta = self::locateHeaderByPhysicalLineScan($preCollapse)
+                ?? self::locateHeaderByUtf8MarkerLine($preCollapse)
+                ?? self::locateHeaderByScanningFgetcsv($preCollapse, 50_000);
+            if ($meta !== null) {
+                if (isset($meta['_header_physical_line'])) {
+                    $meta = self::relocateHeaderMetaUsingPhysicalLine($content, $meta)
+                        ?? self::locateHeaderByPhysicalLineScan($content)
+                        ?? self::locateHeaderByUtf8MarkerLine($content)
+                        ?? self::locateHeaderByScanningFgetcsv($content, 50_000);
+                } else {
+                    $pos = $meta['after_byte_pos'];
+                    $prefixOk = $pos <= strlen($preCollapse) && $pos <= strlen($content)
+                        && substr($preCollapse, 0, $pos) === substr($content, 0, $pos);
+                    if (! $prefixOk) {
+                        $meta = self::locateHeaderByPhysicalLineScan($content)
+                            ?? self::locateHeaderByScanningFgetcsv($content, 50_000)
+                            ?? $meta;
+                    }
+                }
+            }
+        }
+
+        if ($meta === null) {
+            return null;
+        }
+
+        return ['content' => $content, 'meta' => $meta];
+    }
+
+    /**
+     * Без UTF-16 (его обрабатывает {@see convertFileBytesToUtf8Text}).
+     */
+    private static function tryDecodeRawBytesToUtf8Cp1251(string $raw): ?string
+    {
+        if (str_starts_with($raw, "\xFF\xFE") || str_starts_with($raw, "\xFE\xFF")) {
+            return null;
+        }
+        $body = $raw;
+        if (str_starts_with($body, "\xEF\xBB\xBF")) {
+            $body = substr($body, 3);
+        }
+        $converted = @mb_convert_encoding($body, 'UTF-8', 'Windows-1251');
+        if (! is_string($converted) || $converted === '') {
+            return null;
+        }
+
+        return $converted;
     }
 
     /**
@@ -189,7 +262,7 @@ final class RemainsStockCsvReader
      */
     private static function locateHeaderByScanningFgetcsv(string $content, ?int $maxLogicalRows = null): ?array
     {
-        foreach ([',', ';', "\t"] as $delimiter) {
+        foreach ([',', ';', "\t", '|'] as $delimiter) {
             $h = fopen('php://temp', 'r+b');
             if ($h === false) {
                 continue;
@@ -250,7 +323,7 @@ final class RemainsStockCsvReader
                 continue;
             }
 
-            $tryDelims = [',', ';', "\t"];
+            $tryDelims = [',', ';', "\t", '|'];
             foreach ($tryDelims as $d) {
                 $row = self::strGetCsvRow($line, $d);
                 if ($row === []) {
@@ -403,7 +476,13 @@ final class RemainsStockCsvReader
         }
         $lc = mb_strtolower($n, 'UTF-8');
 
-        return $lc === 'код' || (preg_match('/^код(\s|$)/u', $lc) === 1 && mb_strlen($n) <= 64);
+        if ($lc === 'код' || (preg_match('/^код(\s|$)/u', $lc) === 1 && mb_strlen($n) <= 64)) {
+            return true;
+        }
+
+        $ascii = strtolower(preg_replace('/\s+/u', ' ', $n) ?? $n);
+
+        return $ascii === 'code' || (preg_match('/^code(\s|$)/i', $ascii) === 1 && strlen($ascii) <= 64);
     }
 
     private static function headerCellIsArtikul(string $cell): bool
@@ -414,7 +493,21 @@ final class RemainsStockCsvReader
         }
         $lc = mb_strtolower($n, 'UTF-8');
 
-        return $lc === 'артикул' || (preg_match('/^артикул(\s|$)/u', $lc) === 1 && mb_strlen($n) <= 64);
+        if ($lc === 'артикул' || (preg_match('/^артикул(\s|$)/u', $lc) === 1 && mb_strlen($n) <= 64)) {
+            return true;
+        }
+
+        $ascii = strtolower(preg_replace('/\s+/u', ' ', $n) ?? $n);
+
+        if ($ascii === 'article' || (preg_match('/^article(\s|$)/i', $ascii) === 1 && strlen($ascii) <= 64)) {
+            return true;
+        }
+
+        if ($ascii === 'sku' || $ascii === 'part number' || $ascii === 'part no' || $ascii === 'part no.') {
+            return true;
+        }
+
+        return preg_match('/^part\s+number(\s|$)/i', $ascii) === 1 && strlen($ascii) <= 64;
     }
 
     private static function normalizeHeaderLabelForMatch(string $cell): string
