@@ -220,17 +220,19 @@ final class RemainsStockCsvReader
                 : substr($content, $pos, $lineEnd - $pos);
             $afterPos = $lineEnd === false ? $len : $lineEnd + 1;
 
-            $tryDelims = [];
-            if (@preg_match('/,\s*Код\s*,\s*Артикул\s*,/u', $line) === 1) {
-                $tryDelims[] = ',';
-            }
-            if (@preg_match('/;\s*Код\s*;\s*Артикул\s*;/u', $line) === 1) {
-                $tryDelims[] = ';';
-            }
-            if (@preg_match('/\t\s*Код\s*\t\s*Артикул\s*\t/u', $line) === 1) {
-                $tryDelims[] = "\t";
+            // Не полагаемся на preg /u по строке: при «битом» UTF-8 внутри той же строки PCRE может не совпасть,
+            // хотя колонки «Код»/«Артикул» в UTF-8 есть. Достаточно подстрок + str_getcsv по разделителям.
+            $utf8Kod = "\xD0\x9A\xD0\xBE\xD0\xB4";
+            $utf8Artikul = "\xD0\x90\xD1\x80\xD1\x82\xD0\xB8\xD0\xBA\xD1\x83\xD0\xBB";
+            $hasKod = str_contains($line, 'Код') || str_contains($line, $utf8Kod);
+            $hasArtikul = str_contains($line, 'Артикул') || str_contains($line, $utf8Artikul);
+            if (! $hasKod || ! $hasArtikul) {
+                $pos = $afterPos;
+
+                continue;
             }
 
+            $tryDelims = [',', ';', "\t"];
             foreach ($tryDelims as $d) {
                 $row = self::strGetCsvRow($line, $d);
                 if ($row === []) {
