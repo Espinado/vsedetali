@@ -211,7 +211,9 @@ final class RemainsStockCsvReader
      */
     private static function findHeaderMetaAfterNormalize(string $asUtf8): ?array
     {
-        $preCollapsed = self::mergeRemainsTypicalMultilineQuotedFields(self::preCollapseNormalize($asUtf8));
+        $pre = self::preCollapseNormalize($asUtf8);
+        $pre = self::stitchRemainsBrokenHeaderLinePair($pre);
+        $preCollapsed = self::mergeRemainsTypicalMultilineQuotedFields($pre);
         $strict = self::normalizeFileContentString($asUtf8);
 
         // Важно: шапка часто разбита на две физические строки из‑за переноса внутри кавычек
@@ -232,6 +234,93 @@ final class RemainsStockCsvReader
         }
 
         return null;
+    }
+
+    /**
+     * Ищет пару соседних физических строк (шапка «Остатки»), склеивает поле «Сумма/себестоимости» в одну строку.
+     * Не зависит от успеха глобального merge по всему файлу — замена по точному совпадению фрагмента.
+     */
+    private static function stitchRemainsBrokenHeaderLinePair(string $content): string
+    {
+        $normalized = str_replace("\r", '', $content);
+        $lines = explode("\n", $normalized);
+        $max = min(80, count($lines));
+        $offsets = self::byteLineStartOffsets($lines);
+        for ($i = 0; $i + 1 < $max; $i++) {
+            $a = $lines[$i];
+            $b = $lines[$i + 1];
+            if (strpos($a, 'Код') === false || strpos($a, 'Артикул') === false) {
+                continue;
+            }
+            if (preg_match('/^\s*себестоимости/u', $b) !== 1) {
+                continue;
+            }
+            if (preg_match('/Сумма\s*$/u', $a) !== 1) {
+                continue;
+            }
+            $pair = $a."\n".$b;
+            $fixed = self::collapseRemainsSumCostTwoLineFragment($pair);
+            if ($fixed === $pair) {
+                continue;
+            }
+            $start = $offsets[$i];
+            if (isset($offsets[$i + 2])) {
+                $end = $offsets[$i + 2];
+
+                return substr($normalized, 0, $start).$fixed."\n".substr($normalized, $end);
+            }
+
+            return substr($normalized, 0, $start).$fixed;
+        }
+
+        return $content;
+    }
+
+    private static function collapseRemainsSumCostTwoLineFragment(string $pair): string
+    {
+        $s = preg_replace(
+            '/Себестоимость\s*,\s*.\s*Сумма\s*\R+\s*себестоимости.\s*(?=\s*,)/u',
+            'Себестоимость,"Сумма себестоимости"',
+            $pair
+        ) ?? $pair;
+        if ($s !== $pair) {
+            return $s;
+        }
+        $s = preg_replace(
+            '/Себестоимость\s*,\s*Сумма\s*\R+\s*себестоимости\s*(?=\s*,)/u',
+            'Себестоимость,"Сумма себестоимости"',
+            $pair
+        ) ?? $pair;
+        if ($s !== $pair) {
+            return $s;
+        }
+        $s = preg_replace(
+            '/[\'\x{2018}\x{2019}]Сумма\s*\R+\s*себестоимости[\'\x{2018}\x{2019}]/u',
+            '"Сумма себестоимости"',
+            $pair
+        ) ?? $pair;
+
+        return $s;
+    }
+
+    /**
+     * @param  list<string>  $lines
+     * @return list<int>
+     */
+    private static function byteLineStartOffsets(array $lines): array
+    {
+        $offsets = [];
+        $p = 0;
+        $n = count($lines);
+        for ($k = 0; $k < $n; $k++) {
+            $offsets[$k] = $p;
+            $p += strlen($lines[$k]);
+            if ($k + 1 < $n) {
+                $p += 1;
+            }
+        }
+
+        return $offsets;
     }
 
     /**
@@ -877,6 +966,7 @@ final class RemainsStockCsvReader
     private static function normalizeFileContentString(string $bytes): string
     {
         $content = self::preCollapseNormalize($bytes);
+        $content = self::stitchRemainsBrokenHeaderLinePair($content);
         $content = self::mergeRemainsTypicalMultilineQuotedFields($content);
 
         $content = self::collapseNewlinesInsideDoubleQuotedFields($content);
