@@ -4,7 +4,9 @@ namespace App\Providers;
 
 use App\Broadcasting\GuestAwarePusherBroadcaster;
 use App\Models\Setting;
+use App\Models\Staff;
 use Illuminate\Broadcasting\BroadcastManager;
+use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\View;
 use Illuminate\Support\ServiceProvider;
@@ -52,6 +54,14 @@ class AppServiceProvider extends ServiceProvider
      */
     public function boot(): void
     {
+        Gate::before(function ($user, string $ability) {
+            if ($user instanceof Staff && $user->hasRole('admin')) {
+                return true;
+            }
+
+            return null;
+        });
+
         // Older MySQL/MariaDB setups on shared hosting may reject utf8mb4 indexes at 255 chars.
         Schema::defaultStringLength(191);
 

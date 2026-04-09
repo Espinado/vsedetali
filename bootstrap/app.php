@@ -17,6 +17,10 @@ return Application::configure(basePath: dirname(__DIR__))
     ->withMiddleware(function (Middleware $middleware): void {
         // Laragon / nginx за HTTPS: корректный Request::secure() и сессия для /broadcasting/auth
         $middleware->trustProxies(at: '*');
+
+        $middleware->alias([
+            'customer.not.blocked' => \App\Http\Middleware\EnsureCustomerNotBlocked::class,
+        ]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {
         //

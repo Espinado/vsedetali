@@ -2,6 +2,8 @@
 
 namespace App\Filament\Resources;
 
+use App\Authorization\StaffPermission;
+use App\Filament\Concerns\ChecksStaffPermissions;
 use App\Filament\Resources\ShipmentResource\Pages;
 use App\Models\OrderStatus;
 use App\Models\Shipment;
@@ -13,6 +15,8 @@ use Filament\Tables\Table;
 
 class ShipmentResource extends Resource
 {
+    use ChecksStaffPermissions;
+
     protected static ?string $model = Shipment::class;
 
     protected static ?string $navigationIcon = 'heroicon-o-truck';
@@ -20,6 +24,26 @@ class ShipmentResource extends Resource
     protected static ?string $navigationGroup = 'Продажи';
 
     protected static ?int $navigationSort = 20;
+
+    public static function canViewAny(): bool
+    {
+        return static::allow(StaffPermission::SHIPMENTS_MANAGE);
+    }
+
+    public static function canCreate(): bool
+    {
+        return static::allow(StaffPermission::SHIPMENTS_MANAGE);
+    }
+
+    public static function canEdit($record): bool
+    {
+        return static::allow(StaffPermission::SHIPMENTS_MANAGE);
+    }
+
+    public static function canDelete($record): bool
+    {
+        return static::allow(StaffPermission::SHIPMENTS_MANAGE);
+    }
 
     protected static function shipmentStatuses(): array
     {

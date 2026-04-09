@@ -2,6 +2,7 @@
 
 namespace App\Filament\Resources;
 
+use App\Filament\Concerns\AuthorizesContentResource;
 use App\Filament\Resources\PageResource\Pages;
 use App\Models\Page;
 use Filament\Forms;
@@ -12,6 +13,8 @@ use Filament\Tables\Table;
 
 class PageResource extends Resource
 {
+    use AuthorizesContentResource;
+
     protected static ?string $model = Page::class;
 
     protected static ?string $recordTitleAttribute = 'title';

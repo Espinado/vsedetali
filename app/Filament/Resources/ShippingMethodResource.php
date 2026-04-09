@@ -2,6 +2,7 @@
 
 namespace App\Filament\Resources;
 
+use App\Filament\Concerns\AuthorizesSettingsResource;
 use App\Filament\Resources\ShippingMethodResource\Pages;
 use App\Models\ShippingMethod;
 use Filament\Forms;
@@ -12,6 +13,8 @@ use Filament\Tables\Table;
 
 class ShippingMethodResource extends Resource
 {
+    use AuthorizesSettingsResource;
+
     protected static ?string $model = ShippingMethod::class;
 
     protected static ?string $navigationIcon = 'heroicon-o-truck';

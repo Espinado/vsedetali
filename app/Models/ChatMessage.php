@@ -16,6 +16,7 @@ class ChatMessage extends Model
         'conversation_id',
         'sender',
         'user_id',
+        'staff_id',
         'body',
         'read_at',
     ];
@@ -43,5 +44,10 @@ class ChatMessage extends Model
     public function user(): BelongsTo
     {
         return $this->belongsTo(User::class);
+    }
+
+    public function staff(): BelongsTo
+    {
+        return $this->belongsTo(Staff::class);
     }
 }

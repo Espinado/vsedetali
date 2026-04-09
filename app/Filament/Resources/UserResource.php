@@ -2,6 +2,8 @@
 
 namespace App\Filament\Resources;
 
+use App\Authorization\StaffPermission;
+use App\Filament\Concerns\ChecksStaffPermissions;
 use App\Filament\Resources\UserResource\Pages;
 use App\Models\User;
 use Filament\Forms;
@@ -13,15 +15,43 @@ use Illuminate\Support\Facades\Hash;
 
 class UserResource extends Resource
 {
+    use ChecksStaffPermissions;
+
     protected static ?string $model = User::class;
 
     protected static ?string $recordTitleAttribute = 'name';
 
     protected static ?string $navigationIcon = 'heroicon-o-users';
 
-    protected static ?string $navigationGroup = 'Продажи';
+    protected static ?string $navigationLabel = 'Покупатели';
 
-    protected static ?int $navigationSort = 11;
+    protected static ?string $modelLabel = 'Покупатель';
+
+    protected static ?string $pluralModelLabel = 'Покупатели';
+
+    protected static ?string $navigationGroup = 'Главная';
+
+    protected static ?int $navigationSort = 1;
+
+    public static function canViewAny(): bool
+    {
+        return static::allow(StaffPermission::CUSTOMERS_VIEW);
+    }
+
+    public static function canCreate(): bool
+    {
+        return static::allow(StaffPermission::CUSTOMERS_VIEW);
+    }
+
+    public static function canEdit($record): bool
+    {
+        return static::allow(StaffPermission::CUSTOMERS_VIEW);
+    }
+
+    public static function canDelete($record): bool
+    {
+        return static::allow(StaffPermission::CUSTOMERS_VIEW);
+    }
 
     public static function form(Form $form): Form
     {
@@ -37,8 +67,16 @@ class UserResource extends Resource
                 Forms\Components\TextInput::make('phone')
                     ->maxLength(50)
                     ->nullable(),
-                Forms\Components\Toggle::make('is_admin')
-                    ->label('Администратор'),
+                Forms\Components\DateTimePicker::make('blocked_at')
+                    ->label('Заблокирован с')
+                    ->seconds(false)
+                    ->nullable()
+                    ->helperText('Если указано — покупатель не сможет войти и оформить заказ. Очистите поле, чтобы снять блокировку.'),
+                Forms\Components\Textarea::make('block_reason')
+                    ->label('Причина блокировки')
+                    ->rows(2)
+                    ->maxLength(2000)
+                    ->columnSpanFull(),
                 Forms\Components\TextInput::make('password')
                     ->password()
                     ->dehydrateStateUsing(fn ($state) => filled($state) ? Hash::make($state) : null)
@@ -56,7 +94,13 @@ class UserResource extends Resource
                 Tables\Columns\TextColumn::make('name')->searchable()->sortable(),
                 Tables\Columns\TextColumn::make('email')->searchable()->sortable(),
                 Tables\Columns\TextColumn::make('phone')->searchable(),
-                Tables\Columns\IconColumn::make('is_admin')->boolean()->label('Админ')->sortable(),
+                Tables\Columns\TextColumn::make('id')
+                    ->label('Доступ')
+                    ->formatStateUsing(fn ($state, \App\Models\User $record): string => $record->isBlocked() ? 'Заблокирован' : 'Активен')
+                    ->badge()
+                    ->color(fn (\App\Models\User $record): string => $record->isBlocked() ? 'danger' : 'success')
+                    ->sortable(false)
+                    ->searchable(false),
             ])
             ->defaultSort('name')
             ->filters([])

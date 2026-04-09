@@ -1,6 +1,7 @@
 <?php
 
 use App\Models\ChatConversation;
+use App\Models\Staff;
 use App\Models\User;
 use App\Services\StoreChatService;
 use Illuminate\Broadcasting\BroadcastManager;
@@ -9,29 +10,35 @@ use Illuminate\Broadcasting\BroadcastManager;
 $manager = app(BroadcastManager::class);
 $broadcaster = $manager->connection(config('broadcasting.default', 'reverb'));
 
-// Filament / уведомления: private-App.Models.User.{id}
+// Уведомления покупателю (витрина): private-App.Models.User.{id}
 $broadcaster->channel('App.Models.User.{id}', function (?User $user, string $id) {
     return $user && (int) $user->id === (int) $id
         ? ['id' => $user->id, 'name' => $user->name]
         : false;
 }, ['guards' => ['web']]);
 
-$broadcaster->channel('admin.chat', function (?User $user) {
-    return $user && $user->is_admin ? ['id' => $user->id, 'name' => $user->name] : false;
-}, ['guards' => ['web']]);
+// Панель: авторизация через auth('staff') внутри callback (сессия общая с middleware web).
+$broadcaster->channel('admin.chat', function () {
+    $staff = auth('staff')->user();
 
-$broadcaster->channel('chat.{conversationId}', function (?User $user, string $conversationId) {
+    return $staff instanceof Staff && $staff->can('chat.manage')
+        ? ['id' => $staff->id, 'name' => $staff->name]
+        : false;
+});
+
+$broadcaster->channel('chat.{conversationId}', function ($user, string $conversationId) {
     $conversation = ChatConversation::query()->find($conversationId);
 
     if (! $conversation) {
         return false;
     }
 
-    if ($user?->is_admin) {
+    $staff = auth('staff')->user();
+    if ($staff instanceof Staff && $staff->can('chat.manage')) {
         return true;
     }
 
-    if ($user && (int) $conversation->user_id === (int) $user->id) {
+    if ($user instanceof User && (int) $conversation->user_id === (int) $user->id) {
         return true;
     }
 
@@ -41,4 +48,4 @@ $broadcaster->channel('chat.{conversationId}', function (?User $user, string $co
     return $conversation->guest_token
         && $token
         && hash_equals((string) $conversation->guest_token, (string) $token);
-}, ['guards' => ['web']]);
+});

@@ -12,6 +12,7 @@ use App\Mail\OrderNewAdminMail;
 use App\Models\OrderStatus;
 use App\Models\Setting;
 use App\Models\ShippingMethod;
+use App\Services\CustomerBlockingService;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Mail;
 
@@ -30,6 +31,12 @@ class OrderService
         if ($cart->cartItems->isEmpty()) {
             throw new \InvalidArgumentException('Корзина пуста.');
         }
+
+        app(CustomerBlockingService::class)->assertCheckoutAllowed(
+            $customerData['email'],
+            request()->ip(),
+            request()->header('X-Device-Mac')
+        );
 
         $status = OrderStatus::where('slug', 'new')->firstOrFail();
 

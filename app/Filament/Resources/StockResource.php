@@ -2,6 +2,7 @@
 
 namespace App\Filament\Resources;
 
+use App\Filament\Concerns\AuthorizesWarehouseResource;
 use App\Filament\Resources\StockResource\Pages;
 use App\Models\Stock;
 use Filament\Forms;
@@ -12,6 +13,8 @@ use Filament\Tables\Table;
 
 class StockResource extends Resource
 {
+    use AuthorizesWarehouseResource;
+
     protected static ?string $model = Stock::class;
 
     protected static ?string $navigationIcon = 'heroicon-o-archive-box';
@@ -19,6 +22,34 @@ class StockResource extends Resource
     protected static ?string $navigationGroup = 'Склад';
 
     protected static ?int $navigationSort = 20;
+
+    /**
+     * Остатки ведутся только из карточки товара (вкладка «Наличие по складам»).
+     */
+    public static function shouldRegisterNavigation(): bool
+    {
+        return false;
+    }
+
+    public static function canViewAny(): bool
+    {
+        return false;
+    }
+
+    public static function canCreate(): bool
+    {
+        return false;
+    }
+
+    public static function canEdit($record): bool
+    {
+        return false;
+    }
+
+    public static function canDelete($record): bool
+    {
+        return false;
+    }
 
     public static function form(Form $form): Form
     {

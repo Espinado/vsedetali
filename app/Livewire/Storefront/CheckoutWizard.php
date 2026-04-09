@@ -6,6 +6,7 @@ use App\Models\Address;
 use App\Models\PaymentMethod;
 use App\Models\ShippingMethod;
 use App\Services\CartService;
+use App\Services\CustomerBlockingService;
 use App\Services\OrderService;
 use Illuminate\Support\Facades\Auth;
 use Livewire\Component;
@@ -155,6 +156,9 @@ class CheckoutWizard extends Component
     public function step1Next(): void
     {
         $this->validate($this->rules());
+        if (! $this->assertNotBlockedForCheckout()) {
+            return;
+        }
         $this->step = 2;
     }
 
@@ -227,5 +231,22 @@ class CheckoutWizard extends Component
     {
         return view('livewire.storefront.checkout-wizard')
             ->layout('layouts.storefront', ['title' => 'Оформление заказа']);
+    }
+
+    protected function assertNotBlockedForCheckout(): bool
+    {
+        try {
+            app(CustomerBlockingService::class)->assertCheckoutAllowed(
+                $this->customer_email,
+                request()->ip(),
+                request()->header('X-Device-Mac')
+            );
+
+            return true;
+        } catch (\RuntimeException $e) {
+            $this->addError('customer_email', $e->getMessage());
+
+            return false;
+        }
     }
 }

@@ -2,13 +2,22 @@
 
 namespace App\Filament\Widgets;
 
+use App\Authorization\StaffPermission;
 use App\Models\Order;
+use App\Models\Setting;
 use Filament\Widgets\StatsOverviewWidget as BaseWidget;
 use Filament\Widgets\StatsOverviewWidget\Stat;
 
 class OrderStatsWidget extends BaseWidget
 {
     protected static ?int $sort = 1;
+
+    public static function canView(): bool
+    {
+        $staff = auth('staff')->user();
+
+        return $staff !== null && $staff->can(StaffPermission::ORDERS_VIEW);
+    }
 
     protected function getStats(): array
     {
@@ -21,7 +30,7 @@ class OrderStatsWidget extends BaseWidget
         return [
             Stat::make('Всего заказов', number_format($totalOrders, 0, ',', ' ')),
             Stat::make('Заказов сегодня', number_format($ordersToday, 0, ',', ' ')),
-            Stat::make('Выручка за месяц', number_format($revenueMonth, 2, ',', ' ') . ' ' . \App\Models\Setting::get('currency', 'RUB')),
+            Stat::make('Выручка за месяц', number_format($revenueMonth, 2, ',', ' ').' '.Setting::get('currency', 'RUB')),
         ];
     }
 }

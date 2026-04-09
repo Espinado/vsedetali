@@ -2,6 +2,7 @@
 
 namespace App\Filament\Resources;
 
+use App\Filament\Concerns\AuthorizesContentResource;
 use App\Filament\Resources\BannerResource\Pages;
 use App\Models\Banner;
 use Filament\Forms;
@@ -12,6 +13,8 @@ use Filament\Tables\Table;
 
 class BannerResource extends Resource
 {
+    use AuthorizesContentResource;
+
     protected static ?string $model = Banner::class;
 
     protected static ?string $recordTitleAttribute = 'name';

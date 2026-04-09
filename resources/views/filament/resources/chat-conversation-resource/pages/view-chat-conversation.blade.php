@@ -24,8 +24,8 @@
                         <p class="whitespace-pre-wrap break-words">{{ $message->body }}</p>
                         <p class="text-xs opacity-80 mt-1">
                             {{ $message->created_at->format('d.m.Y H:i') }}
-                            @if($message->sender === \App\Models\ChatMessage::SENDER_STAFF && $message->user)
-                                — {{ $message->user->name }}
+                            @if($message->sender === \App\Models\ChatMessage::SENDER_STAFF && ($message->staff || $message->user))
+                                — {{ $message->staff?->name ?? $message->user?->name }}
                             @endif
                         </p>
                     </div>

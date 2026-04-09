@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use App\Events\ChatCustomerMessagesReadByStaff;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
@@ -90,5 +91,13 @@ class ChatConversation extends Model
     public function touchLastMessageAt(): void
     {
         $this->update(['last_message_at' => now()]);
+    }
+
+    /** Диалоги, где последнее сообщение от клиента (ожидают ответа оператора). */
+    public static function conversationsAwaitingStaffReplyCount(): int
+    {
+        return (int) static::query()
+            ->whereHas('latestMessage', fn (Builder $q) => $q->where('sender', ChatMessage::SENDER_CUSTOMER))
+            ->count();
     }
 }

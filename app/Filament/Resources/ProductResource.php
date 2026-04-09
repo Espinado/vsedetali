@@ -2,6 +2,7 @@
 
 namespace App\Filament\Resources;
 
+use App\Filament\Concerns\AuthorizesCatalogResource;
 use App\Filament\Resources\ProductResource\Pages;
 use App\Models\Product;
 use Filament\Forms;
@@ -12,6 +13,8 @@ use Filament\Tables\Table;
 
 class ProductResource extends Resource
 {
+    use AuthorizesCatalogResource;
+
     protected static ?string $model = Product::class;
 
     protected static ?string $navigationLabel = 'Товары';
@@ -127,9 +130,9 @@ class ProductResource extends Resource
     {
         return [
             ProductResource\RelationManagers\ProductAttributesRelationManager::class,
+            ProductResource\RelationManagers\StocksRelationManager::class,
             ProductResource\RelationManagers\ProductVehiclesRelationManager::class,
             ProductResource\RelationManagers\ImagesRelationManager::class,
-            ProductResource\RelationManagers\StocksRelationManager::class,
         ];
     }
 

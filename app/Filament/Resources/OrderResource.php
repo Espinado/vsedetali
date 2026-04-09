@@ -2,6 +2,8 @@
 
 namespace App\Filament\Resources;
 
+use App\Authorization\StaffPermission;
+use App\Filament\Concerns\ChecksStaffPermissions;
 use App\Filament\Resources\OrderResource\Pages;
 use App\Models\Order;
 use Filament\Forms;
@@ -14,6 +16,8 @@ use Filament\Tables\Table;
 
 class OrderResource extends Resource
 {
+    use ChecksStaffPermissions;
+
     protected static ?string $model = Order::class;
 
     protected static ?string $navigationIcon = 'heroicon-o-shopping-cart';
@@ -21,6 +25,27 @@ class OrderResource extends Resource
     protected static ?string $navigationGroup = 'Продажи';
 
     protected static ?int $navigationSort = 10;
+
+    public static function canViewAny(): bool
+    {
+        return static::allow(StaffPermission::ORDERS_VIEW)
+            || static::allow(StaffPermission::FINANCE_VIEW);
+    }
+
+    public static function canCreate(): bool
+    {
+        return false;
+    }
+
+    public static function canEdit($record): bool
+    {
+        return static::allow(StaffPermission::ORDERS_EDIT);
+    }
+
+    public static function canDelete($record): bool
+    {
+        return false;
+    }
 
     public static function form(Form $form): Form
     {

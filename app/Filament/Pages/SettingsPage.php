@@ -2,6 +2,7 @@
 
 namespace App\Filament\Pages;
 
+use App\Authorization\StaffPermission;
 use App\Models\Setting;
 use Filament\Forms;
 use Filament\Forms\Form;
@@ -13,6 +14,13 @@ use Filament\Pages\Page;
 class SettingsPage extends Page implements HasForms
 {
     use InteractsWithForms;
+
+    public static function canAccess(): bool
+    {
+        $staff = auth('staff')->user();
+
+        return $staff !== null && $staff->can(StaffPermission::SETTINGS_MANAGE);
+    }
 
     protected static ?string $navigationIcon = 'heroicon-o-cog-6-tooth';
     protected static ?string $navigationLabel = 'Настройки';

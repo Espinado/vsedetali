@@ -25,6 +25,7 @@ class ViewChatConversation extends ViewRecord
         $this->record->load([
             'messages' => fn ($q) => $q->orderBy('created_at'),
             'messages.user',
+            'messages.staff',
         ]);
     }
 
@@ -42,7 +43,8 @@ class ViewChatConversation extends ViewRecord
         ChatMessage::create([
             'conversation_id' => $this->record->id,
             'sender' => ChatMessage::SENDER_STAFF,
-            'user_id' => auth()->id(),
+            'user_id' => null,
+            'staff_id' => auth('staff')->id(),
             'body' => trim($this->replyBody),
         ]);
 
@@ -51,6 +53,7 @@ class ViewChatConversation extends ViewRecord
         $this->record->load([
             'messages' => fn ($q) => $q->orderBy('created_at'),
             'messages.user',
+            'messages.staff',
         ]);
 
         Notification::make()->title('Сообщение отправлено')->success()->send();

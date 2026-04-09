@@ -2,6 +2,7 @@
 
 namespace App\Filament\Resources;
 
+use App\Filament\Concerns\AuthorizesCatalogResource;
 use App\Filament\Resources\BrandResource\Pages;
 use App\Models\Brand;
 use Filament\Forms;
@@ -12,6 +13,8 @@ use Filament\Tables\Table;
 
 class BrandResource extends Resource
 {
+    use AuthorizesCatalogResource;
+
     protected static ?string $model = Brand::class;
 
     protected static ?string $recordTitleAttribute = 'name';

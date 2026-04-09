@@ -18,6 +18,8 @@ class DatabaseSeeder extends Seeder
             GeelyBambooCatalogSeeder::class,
             PageSeeder::class,
             BannerSeeder::class,
+            RolePermissionSeeder::class,
+            DemoCustomersSeeder::class,
         ]);
     }
 }

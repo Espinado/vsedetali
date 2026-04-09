@@ -2,6 +2,7 @@
 
 namespace App\Filament\Resources;
 
+use App\Filament\Concerns\AuthorizesCatalogResource;
 use App\Filament\Resources\VehicleResource\Pages;
 use App\Models\Vehicle;
 use Filament\Forms;
@@ -12,6 +13,8 @@ use Filament\Tables\Table;
 
 class VehicleResource extends Resource
 {
+    use AuthorizesCatalogResource;
+
     protected static ?string $model = Vehicle::class;
 
     protected static ?string $recordTitleAttribute = 'model';

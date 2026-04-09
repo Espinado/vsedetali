@@ -2,13 +2,16 @@
 
 namespace App\Http\Controllers;
 
-use App\Models\User;
+use App\Services\CustomerBlockingService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Validation\Rules\Password;
 
 class AuthController extends Controller
 {
+    public function __construct(
+        protected CustomerBlockingService $blocking
+    ) {}
     public function showLoginForm()
     {
         return view('auth.login');
@@ -21,14 +24,29 @@ class AuthController extends Controller
             'password' => ['required'],
         ]);
 
-        if (Auth::attempt($validated, $request->boolean('remember'))) {
-            $request->session()->regenerate();
-            return redirect()->intended(route('account.dashboard'));
+        $remember = $request->boolean('remember');
+
+        if ($this->blocking->isEmailBlocked($validated['email'])) {
+            return back()->withErrors([
+                'email' => 'Вход с этим email недоступен. Обратитесь в магазин.',
+            ])->onlyInput('email');
         }
 
-        return back()->withErrors([
-            'email' => __('auth.failed'),
-        ])->onlyInput('email');
+        if ($this->blocking->isIpBlocked($request->ip())) {
+            return back()->withErrors([
+                'email' => 'Вход с вашего подключения временно недоступен. Обратитесь в магазин.',
+            ])->onlyInput('email');
+        }
+
+        if (! Auth::attempt($validated, $remember)) {
+            return back()->withErrors([
+                'email' => __('auth.failed'),
+            ])->onlyInput('email');
+        }
+
+        $request->session()->regenerate();
+
+        return redirect()->intended(route('account.dashboard'));
     }
 
     public function logout(Request $request)
@@ -51,6 +69,18 @@ class AuthController extends Controller
             'email' => ['required', 'string', 'email', 'max:255', 'unique:users'],
             'password' => ['required', 'confirmed', Password::defaults()],
         ]);
+
+        if ($this->blocking->isEmailBlocked($validated['email'])) {
+            return back()->withErrors([
+                'email' => 'Регистрация с этим email недоступна. Обратитесь в магазин.',
+            ])->onlyInput('email');
+        }
+
+        if ($this->blocking->isIpBlocked($request->ip())) {
+            return back()->withErrors([
+                'email' => 'Регистрация с вашего подключения временно недоступна. Обратитесь в магазин.',
+            ])->onlyInput('email');
+        }
 
         $user = User::create([
             'name' => $validated['name'],

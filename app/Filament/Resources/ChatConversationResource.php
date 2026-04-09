@@ -2,6 +2,8 @@
 
 namespace App\Filament\Resources;
 
+use App\Authorization\StaffPermission;
+use App\Filament\Concerns\ChecksStaffPermissions;
 use App\Filament\Resources\ChatConversationResource\Pages;
 use App\Models\ChatConversation;
 use App\Models\ChatMessage;
@@ -15,7 +17,24 @@ use Illuminate\Support\Str;
 
 class ChatConversationResource extends Resource
 {
+    use ChecksStaffPermissions;
+
+    public static function canViewAny(): bool
+    {
+        return static::allow(StaffPermission::CHAT_MANAGE);
+    }
+
     public static function canCreate(): bool
+    {
+        return false;
+    }
+
+    public static function canEdit($record): bool
+    {
+        return static::allow(StaffPermission::CHAT_MANAGE);
+    }
+
+    public static function canDelete($record): bool
     {
         return false;
     }
@@ -36,10 +55,7 @@ class ChatConversationResource extends Resource
 
     public static function getNavigationBadge(): ?string
     {
-        $count = ChatMessage::query()
-            ->where('sender', ChatMessage::SENDER_CUSTOMER)
-            ->whereNull('read_at')
-            ->count();
+        $count = ChatConversation::conversationsAwaitingStaffReplyCount();
 
         return $count > 0 ? (string) $count : null;
     }

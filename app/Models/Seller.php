@@ -7,6 +7,9 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
+/**
+ * Продавец на маркетплейсе. Свои точки отгрузки — {@see Warehouse} с {@see Warehouse::$seller_id}.
+ */
 class Seller extends Model
 {
     use HasFactory;

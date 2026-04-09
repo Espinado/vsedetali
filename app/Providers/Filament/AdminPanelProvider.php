@@ -2,13 +2,16 @@
 
 namespace App\Providers\Filament;
 
+use App\Filament\Pages\Dashboard;
+use App\Models\ChatConversation;
 use Filament\Http\Middleware\Authenticate;
 use Filament\Http\Middleware\DisableBladeIconComponents;
 use Filament\Http\Middleware\DispatchServingFilamentEvent;
-use Filament\Pages;
+use Filament\Navigation\NavigationGroup;
 use Filament\Panel;
 use Filament\PanelProvider;
 use Filament\Support\Colors\Color;
+use Filament\View\PanelsRenderHook;
 use Filament\Widgets;
 use Illuminate\Cookie\Middleware\AddQueuedCookiesToResponse;
 use Illuminate\Cookie\Middleware\EncryptCookies;
@@ -26,6 +29,8 @@ class AdminPanelProvider extends PanelProvider
             ->default()
             ->id('admin')
             ->path('admin')
+            ->authGuard('staff')
+            ->authPasswordBroker('staff')
             ->brandName(config('app.name'))
             ->login()
             ->colors([
@@ -34,12 +39,47 @@ class AdminPanelProvider extends PanelProvider
             ->discoverResources(in: app_path('Filament/Resources'), for: 'App\\Filament\\Resources')
             ->discoverPages(in: app_path('Filament/Pages'), for: 'App\\Filament\\Pages')
             ->pages([
-                Pages\Dashboard::class,
+                Dashboard::class,
+            ])
+            ->collapsibleNavigationGroups(true)
+            ->navigationGroups([
+                NavigationGroup::make()
+                    ->label('Главная')
+                    ->collapsed(true),
+                NavigationGroup::make()
+                    ->label('Каталог')
+                    ->collapsed(true),
+                NavigationGroup::make()
+                    ->label('Продажи')
+                    ->collapsed(true),
+                NavigationGroup::make()
+                    ->label('Склад')
+                    ->collapsed(true),
+                NavigationGroup::make()
+                    ->label('Контент')
+                    ->collapsed(true),
+                NavigationGroup::make()
+                    ->label('Настройки')
+                    ->collapsed(true),
+                NavigationGroup::make()
+                    ->label('Поддержка')
+                    ->collapsed(true)
+                    ->extraSidebarAttributes(function (): array {
+                        if (ChatConversation::conversationsAwaitingStaffReplyCount() <= 0) {
+                            return [];
+                        }
+
+                        return [
+                            'class' => 'fi-sidebar-group--support-awaiting-reply',
+                        ];
+                    }),
+                NavigationGroup::make()
+                    ->label('Система')
+                    ->collapsed(true),
             ])
             ->discoverWidgets(in: app_path('Filament/Widgets'), for: 'App\\Filament\\Widgets')
             ->widgets([
                 Widgets\AccountWidget::class,
-                Widgets\FilamentInfoWidget::class,
             ])
             ->middleware([
                 EncryptCookies::class,
@@ -58,6 +98,18 @@ class AdminPanelProvider extends PanelProvider
             ->renderHook(
                 'panels::head.start',
                 fn (): string => '<meta name="csrf-token" content="'.e(csrf_token()).'">'
+            )
+            ->renderHook(
+                PanelsRenderHook::HEAD_END,
+                fn (): string => view('filament.hooks.sidebar-navigation-storage-sync')->render()
+            )
+            ->renderHook(
+                'panels::styles.after',
+                fn (): string => view('filament.hooks.admin-sidebar-groups-styles')->render()
+            )
+            ->renderHook(
+                'panels::body.end',
+                fn (): string => view('filament.hooks.sidebar-accordion-exclusive')->render()
             )
             ->renderHook(
                 'panels::body.end',

@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\AuthController;
+use App\Http\Controllers\StaffInviteController;
 use App\Http\Controllers\ProductController;
 use App\Http\Controllers\SitemapController;
 use App\Livewire\Storefront\ProductGrid;
@@ -30,6 +31,11 @@ Route::middleware('guest')->group(function () {
 });
 Route::post('/logout', [AuthController::class, 'logout'])->name('logout')->middleware('auth');
 
+Route::middleware('throttle:12,1')->group(function () {
+    Route::get('/staff/invite/{token}', [StaffInviteController::class, 'show'])->name('staff.invite.show');
+    Route::post('/staff/invite/{token}', [StaffInviteController::class, 'update'])->name('staff.invite.update');
+});
+
 Route::get('/sitemap.xml', SitemapController::class)->name('sitemap');
 Route::get('/robots.txt', function () {
     $sitemap = url('/sitemap.xml');
@@ -41,6 +47,7 @@ Route::get('/robots.txt', function () {
         'Disallow: /checkout',
         'Disallow: /login',
         'Disallow: /register',
+        'Disallow: /staff/',
         '',
         'Sitemap: '.$sitemap,
     ]);
@@ -67,20 +74,22 @@ Route::get('/', function () {
 Route::get('/catalog/{categorySlug?}', ProductGrid::class)->name('catalog');
 Route::get('/product/{product:slug}', [ProductController::class, 'show'])->name('product.show');
 Route::get('/cart', \App\Livewire\Storefront\CartPage::class)->name('cart');
-Route::get('/checkout', \App\Livewire\Storefront\CheckoutWizard::class)->name('checkout')->middleware('auth');
-Route::get('/checkout/payment/{order}', function (Order $order) {
-    abort_if($order->user_id !== auth()->id() && ! auth()->user()?->is_admin, 403);
+Route::middleware(['auth', 'customer.not.blocked'])->group(function () {
+    Route::get('/checkout', \App\Livewire\Storefront\CheckoutWizard::class)->name('checkout');
+    Route::get('/checkout/payment/{order}', function (Order $order) {
+        abort_if($order->user_id !== auth()->id(), 403);
 
-    // Статус оплаты меняется на «оплачено» только когда администратор переведёт заказ во второй статус (подтверждён)
-    return view('storefront.checkout-payment', ['order' => $order->load('paymentMethod', 'latestPayment')]);
-})->name('checkout.payment')->middleware('auth');
-Route::get('/checkout/success/{order}', function (Order $order) {
-    abort_if($order->user_id !== auth()->id() && ! auth()->user()?->is_admin, 403);
+        // Статус оплаты меняется на «оплачено» только когда администратор переведёт заказ во второй статус (подтверждён)
+        return view('storefront.checkout-payment', ['order' => $order->load('paymentMethod', 'latestPayment')]);
+    })->name('checkout.payment');
+    Route::get('/checkout/success/{order}', function (Order $order) {
+        abort_if($order->user_id !== auth()->id(), 403);
 
-    return view('storefront.checkout-success', [
-        'order' => $order->load(['status', 'paymentMethod', 'latestPayment']),
-    ]);
-})->name('checkout.success')->middleware('auth');
+        return view('storefront.checkout-success', [
+            'order' => $order->load(['status', 'paymentMethod', 'latestPayment']),
+        ]);
+    })->name('checkout.success');
+});
 Route::get('/page/{slug}', function (string $slug) {
     $page = Page::where('slug', $slug)->active()->firstOrFail();
     $metaDescription = Seo::metaDescription($page->meta_description, $page->body);
@@ -93,7 +102,7 @@ Route::get('/page/{slug}', function (string $slug) {
 })->name('page.show');
 
 // Account (auth required)
-Route::middleware(['auth'])->prefix('account')->name('account.')->group(function () {
+Route::middleware(['auth', 'customer.not.blocked'])->prefix('account')->name('account.')->group(function () {
     Route::get('/', function () {
         $user = auth()->user();
         $recentOrders = $user->orders()->with(['status', 'latestPayment'])->latest()->take(5)->get();
@@ -104,7 +113,7 @@ Route::middleware(['auth'])->prefix('account')->name('account.')->group(function
         return view('account.orders', ['orders' => $orders]);
     })->name('orders.index');
     Route::get('/orders/{order}', function (App\Models\Order $order) {
-        abort_if($order->user_id !== auth()->id() && ! auth()->user()?->is_admin, 403);
+        abort_if($order->user_id !== auth()->id(), 403);
         return view('account.order-show', ['order' => $order->load(['orderItems', 'orderAddresses', 'status', 'shippingMethod', 'paymentMethod', 'latestPayment', 'latestShipment.shippingMethod'])]);
     })->name('orders.show');
     Route::get('/profile', [\App\Http\Controllers\Account\ProfileController::class, 'edit'])->name('profile.edit');
