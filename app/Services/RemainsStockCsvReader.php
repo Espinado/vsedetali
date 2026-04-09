@@ -821,6 +821,13 @@ final class RemainsStockCsvReader
 
         $content = str_replace(["\r\n", "\r"], "\n", $bytes);
 
+        // LibreOffice/Excel: «кавычки» поля часто в U+2018/U+2019, а не в ASCII 0x27 — иначе склейка «Сумма/себестоимости» не срабатывает.
+        $content = str_replace(
+            ["\u{2018}", "\u{2019}", "\u{201A}", "\u{201B}", "\u{FF07}", "\u{02BC}", "\u{02B9}"],
+            "'",
+            $content
+        );
+
         return str_replace(
             ["\xE2\x80\x9C", "\xE2\x80\x9D", "\xE2\x80\x9E", "\xC2\xAB", "\xC2\xBB"],
             '"',
