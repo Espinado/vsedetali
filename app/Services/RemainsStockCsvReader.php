@@ -243,6 +243,20 @@ final class RemainsStockCsvReader
         // Типичный баг 1С: строка шапки обрывается на «…Себестоимость,"Сумма», продолжение на следующей строке.
         // LibreOffice часто сохраняет поле в одинарных кавычках '…' — для fgetcsv важны двойные "…".
         // Без склейки fgetcsv тянет «строку» до EOF — заголовок не находится.
+        $content = self::joinBrokenRemainsSumCostSemantic($content);
+
+        // Любые кавычки (ASCII/U+2019 и т.д.) — по одному символу до/после «Сумма»/«себестоимости».
+        $content = preg_replace(
+            '/Себестоимость\s*,\s*.\s*Сумма\s*\R+\s*себестоимости.\s*(?=\s*,)/u',
+            'Себестоимость,"Сумма себестоимости"',
+            $content
+        ) ?? $content;
+        $content = preg_replace(
+            '/Себестоимость\s*,\s*Сумма\s*\R+\s*себестоимости\s*(?=\s*,)/u',
+            'Себестоимость,"Сумма себестоимости"',
+            $content
+        ) ?? $content;
+
         $content = self::joinBrokenSumCostQuotedLines($content);
 
         $content = preg_replace('/Себестоимость\s*,\s*"Сумма\s*\R\s*себестоимости"/ui', 'Себестоимость,"Сумма себестоимости"', $content) ?? $content;
@@ -292,6 +306,30 @@ final class RemainsStockCsvReader
         }
 
         return $content;
+    }
+
+    /**
+     * Разрыв шапки без надёжных ASCII-кавычек: строка с «Себестоимость» заканчивается на «Сумма», следующая начинается с «себестоимости».
+     */
+    private static function joinBrokenRemainsSumCostSemantic(string $content): string
+    {
+        $lines = explode("\n", str_replace("\r", '', $content));
+        $out = [];
+        for ($i = 0, $n = count($lines); $i < $n; $i++) {
+            $line = $lines[$i];
+            $next = $lines[$i + 1] ?? '';
+            if (
+                $i + 1 < $n
+                && str_contains($line, 'Себестоимость')
+                && preg_match('/Сумма\s*$/u', $line)
+                && preg_match('/^\s*себестоимости/u', $next)
+            ) {
+                $line .= "\n".$lines[++$i];
+            }
+            $out[] = $line;
+        }
+
+        return implode("\n", $out);
     }
 
     /**
@@ -820,6 +858,7 @@ final class RemainsStockCsvReader
         }
 
         $content = str_replace(["\r\n", "\r"], "\n", $bytes);
+        $content = str_replace("\u{200B}", '', $content);
 
         // LibreOffice/Excel: «кавычки» поля часто в U+2018/U+2019, а не в ASCII 0x27 — иначе склейка «Сумма/себестоимости» не срабатывает.
         $content = str_replace(
