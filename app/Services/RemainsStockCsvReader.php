@@ -12,8 +12,9 @@ final class RemainsStockCsvReader
      */
     private static function readCsvRow($handle, string $delimiter): array|false
     {
+        // PHP 8.4+: пустой escape ('') иногда ломает поля в кавычках; «\» — поведение как в 8.3.
         if (PHP_VERSION_ID >= 80400) {
-            return fgetcsv($handle, 0, $delimiter, '"', '');
+            return fgetcsv($handle, 0, $delimiter, '"', '\\');
         }
 
         return fgetcsv($handle, 0, $delimiter, '"');
@@ -933,7 +934,7 @@ final class RemainsStockCsvReader
     private static function strGetCsvRow(string $line, string $delimiter): array
     {
         if (PHP_VERSION_ID >= 80400) {
-            $row = str_getcsv($line, $delimiter, '"', '');
+            $row = str_getcsv($line, $delimiter, '"', '\\');
         } else {
             $row = str_getcsv($line, $delimiter, '"');
         }
@@ -964,7 +965,40 @@ final class RemainsStockCsvReader
         // Классический отчёт: «Код» + «Артикул». Часто в 1С/Excel: «Артикул» + «Наименование» без колонки «Код».
         $ok = ($hasKod && $hasArtikul) || ($hasArtikul && $hasName);
 
-        return $ok || self::rowLooksLikeRemainsTableHeaderLoose($cells);
+        if ($ok) {
+            return true;
+        }
+
+        if (self::remainsTableHeaderMatchesUtf8KodArtikulLabels($cells)) {
+            return true;
+        }
+
+        return self::rowLooksLikeRemainsTableHeaderLoose($cells);
+    }
+
+    /**
+     * Запасной признак шапки без mb_strtolower: точное совпадение ячеек с UTF-8 «Код» и «Артикул».
+     *
+     * @param  list<string>  $cells
+     */
+    private static function remainsTableHeaderMatchesUtf8KodArtikulLabels(array $cells): bool
+    {
+        $kod = "\xD0\x9A\xD0\xBE\xD0\xB4";
+        $art = "\xD0\x90\xD1\x80\xD1\x82\xD0\xB8\xD0\xBA\xD1\x83\xD0\xBB";
+        $hasKod = false;
+        $hasArtikul = false;
+        foreach ($cells as $cell) {
+            $t = trim((string) $cell);
+            $t = preg_replace('/^\x{FEFF}/u', '', $t) ?? $t;
+            if ($t === $kod) {
+                $hasKod = true;
+            }
+            if ($t === $art) {
+                $hasArtikul = true;
+            }
+        }
+
+        return $hasKod && $hasArtikul;
     }
 
     /**
