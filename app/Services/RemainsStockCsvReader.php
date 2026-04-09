@@ -1293,8 +1293,59 @@ final class RemainsStockCsvReader
         $s = self::normalizeUtf8String(trim((string) ($c ?? ''), " \t\n\r\0\x0B\xEF\xBB\xBF"));
         $s = str_replace("\xC2\xA0", ' ', $s);
         $s = preg_replace('/[\x{200B}\x{FEFF}]/u', '', $s) ?? $s;
+        $s = trim($s);
 
-        return trim($s);
+        if (self::headerCellIsKod($s) || self::headerCellIsArtikul($s) || self::headerCellIsNameColumn($s)) {
+            return $s;
+        }
+
+        $repaired = self::tryRepairUtf8BytesMisreadAsSingleByteEncoding($s);
+        if ($repaired !== $s) {
+            return $repaired;
+        }
+
+        return $s;
+    }
+
+    /**
+     * Типичная ошибка: UTF-8 прочитан как однобайтовая кодировка (CP1251/Latin-1) и снова сохранён как UTF-8 — «Артикул» → «РђСЂС‚РёРєСѓР».
+     * Пробуем: (1) байты строки как CP1251 → UTF-8; (2) двойное преобразование UTF-8→CP1251→UTF-8 (аналог исправления «двойного» utf8 в MySQL).
+     */
+    private static function tryRepairUtf8BytesMisreadAsSingleByteEncoding(string $s): string
+    {
+        if ($s === '') {
+            return $s;
+        }
+
+        $encodings = ['Windows-1251', 'ISO-8859-1', 'Windows-1252'];
+
+        foreach ($encodings as $enc) {
+            $direct = @mb_convert_encoding($s, 'UTF-8', $enc);
+            if (is_string($direct) && $direct !== '' && $direct !== $s && mb_check_encoding($direct, 'UTF-8')) {
+                $t = trim(self::normalizeUtf8String($direct));
+                if (self::headerCellIsKod($t) || self::headerCellIsArtikul($t) || self::headerCellIsNameColumn($t)) {
+                    return $t;
+                }
+            }
+
+            $mid = @mb_convert_encoding($s, $enc, 'UTF-8');
+            if (! is_string($mid) || $mid === '') {
+                continue;
+            }
+            $roundTrip = @mb_convert_encoding($mid, 'UTF-8', $enc);
+            if (! is_string($roundTrip) || $roundTrip === '' || $roundTrip === $s) {
+                continue;
+            }
+            if (! mb_check_encoding($roundTrip, 'UTF-8')) {
+                continue;
+            }
+            $t = trim(self::normalizeUtf8String($roundTrip));
+            if (self::headerCellIsKod($t) || self::headerCellIsArtikul($t) || self::headerCellIsNameColumn($t)) {
+                return $t;
+            }
+        }
+
+        return $s;
     }
 
     /**
