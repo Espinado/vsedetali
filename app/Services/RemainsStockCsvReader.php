@@ -212,7 +212,9 @@ final class RemainsStockCsvReader
      */
     private static function findHeaderMetaAfterNormalize(string $asUtf8): ?array
     {
-        $pre = self::preCollapseNormalize($asUtf8);
+        // Только BOM/переводы строк/«умные» кавычки — без merge по всему файлу (он может портить байты до шапки).
+        $minimal = self::preCollapseNormalize($asUtf8);
+        $pre = $minimal;
         $pre = self::replaceAsciiQuotedSummaNewlineSebestoimostiUtf8($pre);
         $pre = self::repairRemainsHeaderAfterUtf8KodArtikulMarker($pre);
         $pre = self::stitchRemainsBrokenHeaderLinePair($pre);
@@ -222,6 +224,7 @@ final class RemainsStockCsvReader
         // Важно: шапка часто разбита на две физические строки из‑за переноса внутри кавычек
         // («Сумма» + newline + «себестоимости»). Якорь ,Код,Артикул, + fgetcsv с позиции строки — надёжнее полного скана.
         $variants = [
+            ['minimal', $minimal],
             ['preCollapsed', $preCollapsed],
             ['strict', $strict],
         ];
@@ -232,6 +235,7 @@ final class RemainsStockCsvReader
             $meta = self::locateHeaderByAnchorNeedleAndFgetcsv($blob)
                 ?? self::locateHeaderByPhysicalLineScan($blob)
                 ?? self::locateHeaderByUtf8MarkerLine($blob)
+                ?? self::locateHeaderByContiguousUtf8KodArtikulCommaLine($blob)
                 ?? self::locateHeaderByScanningFgetcsv($blob, 50_000);
             if ($meta !== null) {
                 return ['content' => $blob, 'meta' => $meta];
@@ -710,6 +714,7 @@ final class RemainsStockCsvReader
     {
         return self::locateHeaderByPhysicalLineScan($content)
             ?? self::locateHeaderByUtf8MarkerLine($content)
+            ?? self::locateHeaderByContiguousUtf8KodArtikulCommaLine($content)
             ?? self::locateHeaderByScanningFgetcsv($content, 50_000);
     }
 
@@ -950,6 +955,71 @@ final class RemainsStockCsvReader
             if (self::parsedRowIsRemainsTableHeader($normalized)) {
                 return $normalized;
             }
+        }
+
+        foreach ($candidates as $row) {
+            if (! is_array($row) || $row === []) {
+                continue;
+            }
+            if (self::rowCellsMatchUtf8KodArtikulTypicalIndices($row)) {
+                return array_map(fn ($c) => self::normalizeCsvHeaderCell($c), $row);
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Типичный отчёт: пустая первая колонка, затем UTF-8 «Код» и «Артикул» — без mb/preg по меткам (устойчиво к сбоям mbstring).
+     *
+     * @param  list<string>  $cells
+     */
+    private static function rowCellsMatchUtf8KodArtikulTypicalIndices(array $cells): bool
+    {
+        $kod = "\xD0\x9A\xD0\xBE\xD0\xB4";
+        $art = "\xD0\x90\xD1\x80\xD1\x82\xD0\xB8\xD0\xBA\xD1\x83\xD0\xBB";
+        foreach ([[1, 2], [0, 1]] as [$i, $j]) {
+            if (! isset($cells[$i], $cells[$j])) {
+                continue;
+            }
+            $a = trim((string) $cells[$i], " \t\n\r\0\x0B");
+            $b = trim((string) $cells[$j], " \t\n\r\0\x0B");
+            $a = preg_replace('/^\x{FEFF}/u', '', $a) ?? $a;
+            $b = preg_replace('/^\x{FEFF}/u', '', $b) ?? $b;
+            if ($a === $kod && $b === $art) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * Первая физическая строка, где как подстрока встречается «,Код,Артикул,» в UTF-8 (без preg — не зависит от PCRE UTF-8).
+     *
+     * @return array{delimiter: string, after_byte_pos: int, header: list<string>, _header_physical_line?: string}|null
+     */
+    private static function locateHeaderByContiguousUtf8KodArtikulCommaLine(string $content): ?array
+    {
+        $needle = ",\xD0\x9A\xD0\xBE\xD0\xB4,\xD0\x90\xD1\x80\xD1\x82\xD0\xB8\xD0\xBA\xD1\x83\xD0\xBB,";
+        $pos = 0;
+        $len = strlen($content);
+        for ($lineNum = 0; $lineNum < 500 && $pos < $len; $lineNum++) {
+            $lineEnd = strpos($content, "\n", $pos);
+            $line = $lineEnd === false ? substr($content, $pos) : substr($content, $pos, $lineEnd - $pos);
+            $afterPos = $lineEnd === false ? $len : $lineEnd + 1;
+            if (strpos($line, $needle) !== false) {
+                $normalized = self::parseHeaderRowWithCsvFallbacks($line, ',');
+                if ($normalized !== null) {
+                    return [
+                        'delimiter' => ',',
+                        'after_byte_pos' => $afterPos,
+                        'header' => $normalized,
+                        '_header_physical_line' => $line,
+                    ];
+                }
+            }
+            $pos = $afterPos;
         }
 
         return null;
