@@ -283,6 +283,11 @@ final class RemainsStockCsvReader
      */
     private static function replaceAsciiQuotedSummaNewlineSebestoimostiUtf8(string $s): string
     {
+        $t = self::flexibleBinaryReplaceQuotedSummaNewlineSebestoimosti($s);
+        if ($t !== $s) {
+            return $t;
+        }
+
         $sum = "\xD0\xA1\xD1\x83\xD0\xBC\xD0\xBC\xD0\xB0";
         $seb = "\xD1\x81\xD0\xB5\xD0\xB1\xD0\xB5\xD1\x81\xD1\x82\xD0\xBE\xD0\xB8\xD0\xBC\xD0\xBE\xD1\x81\xD1\x82\xD0\xB8";
         $rep = "\x22".$sum."\x20".$seb."\x22";
@@ -291,6 +296,79 @@ final class RemainsStockCsvReader
             if (str_contains($s, $needle)) {
                 return str_replace($needle, $rep, $s);
             }
+        }
+
+        return $s;
+    }
+
+    /**
+     * Ищет «кавычка + Сумма + пробелы/переводы + себестоимости + кавычка» по байтам UTF-8 (типографские кавычки, лишние пробелы у переноса).
+     */
+    private static function flexibleBinaryReplaceQuotedSummaNewlineSebestoimosti(string $s): string
+    {
+        $sum = "\xD0\xA1\xD1\x83\xD0\xBC\xD0\xBC\xD0\xB0";
+        $seb = "\xD1\x81\xD0\xB5\xD0\xB1\xD0\xB5\xD1\x81\xD1\x82\xD0\xBE\xD0\xB8\xD0\xBC\xD0\xBE\xD1\x81\xD1\x82\xD0\xB8";
+        $rep = "\x22".$sum."\x20".$seb."\x22";
+        $openQuotes = ["'", "\xE2\x80\x99", "\xE2\x80\x98"];
+
+        $pos = 0;
+        $sumLen = strlen($sum);
+        $sebLen = strlen($seb);
+        while (($i = strpos($s, $sum, $pos)) !== false) {
+            $matchedQuote = null;
+            foreach ($openQuotes as $q) {
+                $ql = strlen($q);
+                if ($i >= $ql && substr($s, $i - $ql, $ql) === $q) {
+                    $matchedQuote = $q;
+
+                    break;
+                }
+            }
+            if ($matchedQuote === null) {
+                $pos = $i + 1;
+
+                continue;
+            }
+            $ql = strlen($matchedQuote);
+            $after = substr($s, $i + $sumLen);
+            $j = 0;
+            $alen = strlen($after);
+            while ($j < $alen) {
+                $c = $after[$j];
+                $o = ord($c);
+                if ($c === ' ' || $c === "\t" || $c === "\r" || $c === "\n" || $o === 0x0B || $o === 0x0C) {
+                    $j++;
+
+                    continue;
+                }
+
+                break;
+            }
+            $rest = substr($after, $j);
+            if ($sebLen === 0 || strlen($rest) < $sebLen || substr($rest, 0, $sebLen) !== $seb) {
+                $pos = $i + 1;
+
+                continue;
+            }
+            $tail = substr($rest, $sebLen);
+            $closeLen = 0;
+            foreach ($openQuotes as $q) {
+                $cl = strlen($q);
+                if (strlen($tail) >= $cl && substr($tail, 0, $cl) === $q) {
+                    $closeLen = $cl;
+
+                    break;
+                }
+            }
+            if ($closeLen === 0) {
+                $pos = $i + 1;
+
+                continue;
+            }
+            $start = $i - $ql;
+            $oldLen = ($i + $sumLen + $j + $sebLen + $closeLen) - $start;
+
+            return substr($s, 0, $start).$rep.substr($s, $start + $oldLen);
         }
 
         return $s;
