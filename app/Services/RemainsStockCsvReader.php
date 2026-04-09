@@ -241,29 +241,36 @@ final class RemainsStockCsvReader
     private static function mergeRemainsTypicalMultilineQuotedFields(string $content): string
     {
         $content = preg_replace('/"Сумма\h*\R\h*себестоимости"/u', '"Сумма себестоимости"', $content) ?? $content;
+        $content = preg_replace('/"Сумма\s*\R+\s*себестоимости"/u', '"Сумма себестоимости"', $content) ?? $content;
         $content = preg_replace('/"Сумма\s*\/\s*себестоимости"/u', '"Сумма себестоимости"', $content) ?? $content;
         $content = preg_replace('/"Сумма\s+себестоимости"/u', '"Сумма себестоимости"', $content) ?? $content;
-        $content = str_replace('"Сумма'."\n".'себестоимости"', '"Сумма себестоимости"', $content);
+        foreach (["\r\n", "\r", "\n"] as $nl) {
+            $content = str_replace('"Сумма'.$nl.'себестоимости"', '"Сумма себестоимости"', $content);
+        }
 
         return $content;
     }
 
     /**
-     * Находит начало строки с подстрокой «,Код,Артикул,» (или ; / таб), читает одну логическую запись fgetcsv — с переносами в кавычках.
+     * Находит шапку по шаблону «,Код,Артикул,» (пробелы вокруг запятых допускаются), читает одну логическую запись fgetcsv — с переносами в кавычках.
      *
      * @return array{delimiter: string, after_byte_pos: int, header: list<string>}|null
      */
     private static function locateHeaderByAnchorNeedleAndFgetcsv(string $content): ?array
     {
-        $needles = [
-            [',', ',Код,Артикул,'],
-            [';', ';Код;Артикул;'],
-            ["\t", "\tКод\tАртикул\t"],
+        $patterns = [
+            [',', '/,\s*Код\s*,\s*Артикул\s*,/u'],
+            [';', '/;\s*Код\s*;\s*Артикул\s*;/u'],
+            ["\t", '/\t\s*Код\s*\t\s*Артикул\s*\t/u'],
         ];
 
-        foreach ($needles as [$delimiter, $needle]) {
-            $at = strpos($content, $needle);
-            if ($at === false) {
+        foreach ($patterns as [$delimiter, $regex]) {
+            if (preg_match($regex, $content, $m, PREG_OFFSET_CAPTURE) !== 1) {
+                continue;
+            }
+
+            $at = (int) ($m[0][1] ?? -1);
+            if ($at < 0) {
                 continue;
             }
 
@@ -579,7 +586,9 @@ final class RemainsStockCsvReader
         }
 
         // Классический отчёт: «Код» + «Артикул». Часто в 1С/Excel: «Артикул» + «Наименование» без колонки «Код».
-        return ($hasKod && $hasArtikul) || ($hasArtikul && $hasName);
+        $ok = ($hasKod && $hasArtikul) || ($hasArtikul && $hasName);
+
+        return $ok || self::rowLooksLikeRemainsTableHeaderLoose($cells);
     }
 
     /**
@@ -662,12 +671,42 @@ final class RemainsStockCsvReader
     private static function normalizeHeaderLabelForMatch(string $cell): string
     {
         $s = trim((string) $cell);
+        if (str_starts_with($s, "\xEF\xBB\xBF")) {
+            $s = substr($s, 3);
+        }
         $s = str_replace("\xC2\xA0", ' ', $s);
         $s = preg_replace('/[\x{200B}\x{FEFF}]/u', '', $s) ?? $s;
         $s = trim($s);
         $s = preg_replace('/[:：]$/u', '', $s) ?? $s;
 
         return trim($s);
+    }
+
+    /**
+     * Запасная проверка шапки, если в ячейке остались невидимые символы (Excel / BOM).
+     *
+     * @param  list<string>  $cells
+     */
+    private static function rowLooksLikeRemainsTableHeaderLoose(array $cells): bool
+    {
+        $hasKod = false;
+        $hasArtikul = false;
+        $hasName = false;
+        foreach ($cells as $cell) {
+            $s = self::normalizeHeaderLabelForMatch((string) $cell);
+            $lc = mb_strtolower($s, 'UTF-8');
+            if ($lc === 'код' || preg_match('/^код(\s|$|[,;])/u', $lc) === 1) {
+                $hasKod = true;
+            }
+            if ($lc === 'артикул' || preg_match('/^артикул(\s|$|[,;])/u', $lc) === 1) {
+                $hasArtikul = true;
+            }
+            if (str_starts_with($lc, 'наименование') || $lc === 'номенклатура' || str_starts_with($lc, 'название')) {
+                $hasName = true;
+            }
+        }
+
+        return ($hasKod && $hasArtikul) || ($hasArtikul && $hasName);
     }
 
     /**
