@@ -83,12 +83,7 @@ class WarehouseResource extends Resource
                     ->badge()
                     ->color(fn (Warehouse $record): string => $record->isPlatformWarehouse() ? 'success' : 'gray')
                     ->sortable(query: fn (Builder $query, string $direction): Builder => $query->orderBy('seller_id', $direction))
-                    ->searchable(query: function (Builder $query, string $search): Builder {
-                        return $query->where(function (Builder $q) use ($search): void {
-                            $q->whereNull('seller_id')
-                                ->orWhereHas('seller', fn (Builder $sq) => $sq->where('name', 'like', "%{$search}%"));
-                        });
-                    }),
+                    ->searchable(false),
                 Tables\Columns\TextColumn::make('stocks_count')
                     ->label('Остатков')
                     ->counts('stocks'),
