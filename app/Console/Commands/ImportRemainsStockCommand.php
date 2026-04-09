@@ -15,7 +15,7 @@ class ImportRemainsStockCommand extends Command
         {--catalog-images : Принудительно включить загрузку фото из каталога (по умолчанию уже включено, если не задано REMAINS_IMPORT_CATALOG_IMAGES=false)}
         {--encoding=auto : Кодировка CSV: auto, utf-8, cp1251 (Windows-1251)}';
 
-    protected $description = 'Импорт остатков из CSV «Остатки»: секции (Марки/, Производители/, DSLK, Б/У Дефект…), Доступно, себестоимость, цена; существующий SKU не обновляется';
+    protected $description = 'Импорт остатков из CSV «Остатки»: секции (Марки/, Производители/, DSLK, Б/У Дефект…), кол-во из колонки «Остаток», себестоимость, цена; существующий SKU не обновляется';
 
     public function handle(RemainsStockCsvImportService $service, AutoPartsCatalogService $catalog): int
     {

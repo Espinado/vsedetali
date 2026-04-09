@@ -13,7 +13,10 @@ use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 
 /**
- * Импорт CSV отчёта «Остатки» с секциями (Код, Артикул, Наименование, Доступно, Себестоимость, Цена продажи, …).
+ * Импорт CSV отчёта «Остатки» с секциями (Код, Артикул, Наименование, …, Остаток, Себестоимость, …).
+ *
+ * Количество на складе (stocks.quantity) берётся из колонки «Остаток» (типичный порядок 1С при ведущей
+ * пустой колонке: индекс 8; не путать с «Доступно» на индексе 5).
  *
  * Правила:
  * - Существующий SKU: строка пропускается целиком (без обновления).
@@ -139,12 +142,13 @@ class RemainsStockCsvImportService
                 ? $skuRaw
                 : (mb_substr($skuRaw, 0, 90).'_'.substr(md5($skuRaw), 0, 8));
 
-            $available = (int) round($this->parseDecimal($row[5] ?? '0') ?? 0);
-            $reserved = (int) round($this->parseDecimal($row[6] ?? '0') ?? 0);
+            // 5 Доступно, 6 Резерв, 7 Ожидание, 8 Остаток — наличие в stocks.quantity = «Остаток»
+            $quantity = $this->parseStocksUnsignedIntColumn($row[8] ?? '0', 'Остаток', $sku);
+            $reserved = $this->parseStocksUnsignedIntColumn($row[6] ?? '0', 'Резерв', $sku);
             $costPrice = $this->parseDecimal($row[9] ?? null);
             $salePrice = $this->parseDecimal($row[11] ?? null);
             $days = isset($row[13]) && $row[13] !== ''
-                ? (int) round($this->parseDecimal($row[13]) ?? 0)
+                ? $this->parseDaysInWarehouseColumn($row[13], $sku)
                 : null;
 
             if ($dryRun) {
@@ -166,7 +170,7 @@ class RemainsStockCsvImportService
                 $sku,
                 $code,
                 $name,
-                $available,
+                $quantity,
                 $reserved,
                 $costPrice,
                 $salePrice,
@@ -244,7 +248,7 @@ class RemainsStockCsvImportService
                         'warehouse_id' => $warehouse->id,
                     ],
                     [
-                        'quantity' => max(0, $available),
+                        'quantity' => max(0, $quantity),
                         'reserved_quantity' => max(0, $reserved),
                         'days_in_warehouse' => $days,
                     ]
@@ -486,6 +490,54 @@ class RemainsStockCsvImportService
         }
 
         return (float) $normalized;
+    }
+
+    /**
+     * stocks.quantity / reserved_quantity — MySQL unsignedInteger (макс. 4294967295).
+     * Большие числа бывают из‑за склейки цифр в ячейке или сдвига колонок; иначе INSERT падает с 22003.
+     */
+    private function parseStocksUnsignedIntColumn(string $raw, string $label, string $sku): int
+    {
+        $f = $this->parseDecimal($raw) ?? 0.0;
+        if (! is_finite($f) || $f < 0) {
+            return 0;
+        }
+        $max = 4_294_967_295;
+        if ($f > $max) {
+            Log::warning('remains_import_quantity_out_of_range', [
+                'sku' => $sku,
+                'column' => $label,
+                'raw' => $raw,
+                'parsed' => $f,
+            ]);
+
+            return 0;
+        }
+
+        return (int) round($f);
+    }
+
+    /**
+     * Разумный потолок для «дней на складе», чтобы не упираться в unsigned int при битой ячейке.
+     */
+    private function parseDaysInWarehouseColumn(string $raw, string $sku): int
+    {
+        $f = $this->parseDecimal($raw) ?? 0.0;
+        if (! is_finite($f) || $f < 0) {
+            return 0;
+        }
+        $max = 36_500;
+        if ($f > $max) {
+            Log::warning('remains_import_days_out_of_range', [
+                'sku' => $sku,
+                'raw' => $raw,
+                'parsed' => $f,
+            ]);
+
+            return $max;
+        }
+
+        return (int) round($f);
     }
 
     private function uniqueProductSlug(string $sku): string
