@@ -212,6 +212,7 @@ final class RemainsStockCsvReader
     private static function findHeaderMetaAfterNormalize(string $asUtf8): ?array
     {
         $pre = self::preCollapseNormalize($asUtf8);
+        $pre = self::replaceAsciiQuotedSummaNewlineSebestoimostiUtf8($pre);
         $pre = self::repairRemainsHeaderAfterUtf8KodArtikulMarker($pre);
         $pre = self::stitchRemainsBrokenHeaderLinePair($pre);
         $preCollapsed = self::mergeRemainsTypicalMultilineQuotedFields($pre);
@@ -278,6 +279,24 @@ final class RemainsStockCsvReader
     }
 
     /**
+     * «'Сумма» + перевод + «себестоимости'» → RFC-поле в двойных кавычках. Только конкатенация байтов UTF-8 (без regex и без кириллицы в литералах PHP).
+     */
+    private static function replaceAsciiQuotedSummaNewlineSebestoimostiUtf8(string $s): string
+    {
+        $sum = "\xD0\xA1\xD1\x83\xD0\xBC\xD0\xBC\xD0\xB0";
+        $seb = "\xD1\x81\xD0\xB5\xD0\xB1\xD0\xB5\xD1\x81\xD1\x82\xD0\xBE\xD0\xB8\xD0\xBC\xD0\xBE\xD1\x81\xD1\x82\xD0\xB8";
+        $rep = "\x22".$sum."\x20".$seb."\x22";
+        foreach (["\n", "\r\n", "\r"] as $nl) {
+            $needle = "'".$sum.$nl.$seb."'";
+            if (str_contains($s, $needle)) {
+                return str_replace($needle, $rep, $s);
+            }
+        }
+
+        return $s;
+    }
+
+    /**
      * Находит в файле UTF-8 последовательность «,Код,Артикул,» и чинит типичный разрыв «'Сумма» + перевод строки + «себестоимости'» в первых двух строках шапки.
      * Не использует литералы «Код» из исходников — только байты UTF-8 (на случай странностей окружения).
      */
@@ -316,6 +335,8 @@ final class RemainsStockCsvReader
 
     private static function collapseRemainsSumCostTwoLineFragment(string $pair): string
     {
+        $pair = self::replaceAsciiQuotedSummaNewlineSebestoimostiUtf8($pair);
+
         // Якорь по байтам UTF-8: ' + «Сумма» + перевод строки + «себестоимости» + '.
         // Важно: шаблон в двойных кавычках PHP — иначе в одинарных \xDD не станет байтом и совпадений не будет.
         $s = preg_replace(
@@ -394,6 +415,8 @@ final class RemainsStockCsvReader
      */
     private static function mergeRemainsTypicalMultilineQuotedFields(string $content): string
     {
+        $content = self::replaceAsciiQuotedSummaNewlineSebestoimostiUtf8($content);
+
         // Типичный баг 1С: строка шапки обрывается на «…Себестоимость,"Сумма», продолжение на следующей строке.
         // LibreOffice часто сохраняет поле в одинарных кавычках '…' — для fgetcsv важны двойные "…".
         // Без склейки fgetcsv тянет «строку» до EOF — заголовок не находится.
@@ -1052,6 +1075,7 @@ final class RemainsStockCsvReader
     private static function normalizeFileContentString(string $bytes): string
     {
         $content = self::preCollapseNormalize($bytes);
+        $content = self::replaceAsciiQuotedSummaNewlineSebestoimostiUtf8($content);
         $content = self::repairRemainsHeaderAfterUtf8KodArtikulMarker($content);
         $content = self::stitchRemainsBrokenHeaderLinePair($content);
         $content = self::mergeRemainsTypicalMultilineQuotedFields($content);
