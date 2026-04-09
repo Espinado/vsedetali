@@ -278,8 +278,15 @@ final class RemainsStockCsvReader
 
     private static function collapseRemainsSumCostTwoLineFragment(string $pair): string
     {
+        foreach (["'Сумма\nсебестоимости'", "'Сумма\r\nсебестоимости'", "'Сумма\rсебестоимости'"] as $lit) {
+            if (str_contains($pair, $lit)) {
+                return str_replace($lit, '"Сумма себестоимости"', $pair);
+            }
+        }
+
+        // Запятая ASCII или fullwidth U+FF0C (Excel) после закрывающей кавычки.
         $s = preg_replace(
-            '/Себестоимость\s*,\s*.\s*Сумма\s*\R+\s*себестоимости.\s*(?=\s*,)/u',
+            '/Себестоимость\s*,\s*.\s*Сумма\s*\R+\s*себестоимости.\s*(?=\s*[,\x{FF0C}])/u',
             'Себестоимость,"Сумма себестоимости"',
             $pair
         ) ?? $pair;
@@ -287,7 +294,7 @@ final class RemainsStockCsvReader
             return $s;
         }
         $s = preg_replace(
-            '/Себестоимость\s*,\s*Сумма\s*\R+\s*себестоимости\s*(?=\s*,)/u',
+            '/Себестоимость\s*,\s*Сумма\s*\R+\s*себестоимости\s*(?=\s*[,\x{FF0C}])/u',
             'Себестоимость,"Сумма себестоимости"',
             $pair
         ) ?? $pair;
@@ -336,12 +343,12 @@ final class RemainsStockCsvReader
 
         // Любые кавычки (ASCII/U+2019 и т.д.) — по одному символу до/после «Сумма»/«себестоимости».
         $content = preg_replace(
-            '/Себестоимость\s*,\s*.\s*Сумма\s*\R+\s*себестоимости.\s*(?=\s*,)/u',
+            '/Себестоимость\s*,\s*.\s*Сумма\s*\R+\s*себестоимости.\s*(?=\s*[,\x{FF0C}])/u',
             'Себестоимость,"Сумма себестоимости"',
             $content
         ) ?? $content;
         $content = preg_replace(
-            '/Себестоимость\s*,\s*Сумма\s*\R+\s*себестоимости\s*(?=\s*,)/u',
+            '/Себестоимость\s*,\s*Сумма\s*\R+\s*себестоимости\s*(?=\s*[,\x{FF0C}])/u',
             'Себестоимость,"Сумма себестоимости"',
             $content
         ) ?? $content;
@@ -469,6 +476,9 @@ final class RemainsStockCsvReader
             if ($tail === '') {
                 continue;
             }
+
+            $tail = self::stitchRemainsBrokenHeaderLinePair($tail);
+            $tail = self::mergeRemainsTypicalMultilineQuotedFields($tail);
 
             $h = fopen('php://temp', 'r+b');
             if ($h === false) {
@@ -726,17 +736,35 @@ final class RemainsStockCsvReader
         }
 
         $normalized = array_map(fn ($c) => self::normalizeCsvHeaderCell($c), $row);
+        $afterBytePos = $lineEnd === false ? strlen($content) : $lineEnd + 1;
+        $physicalLine = $line;
+
+        if (! self::parsedRowIsRemainsTableHeader($normalized) && $lineEnd !== false) {
+            $lineEnd2 = strpos($content, "\n", $lineEnd + 1);
+            $nextLine = $lineEnd2 === false
+                ? substr($content, $lineEnd + 1)
+                : substr($content, $lineEnd + 1, $lineEnd2 - $lineEnd - 1);
+            $extended = $line."\n".$nextLine;
+            $fixed = self::collapseRemainsSumCostTwoLineFragment($extended);
+            if ($fixed !== $extended) {
+                $row = self::strGetCsvRow($fixed, $delimiter);
+                if ($row !== []) {
+                    $normalized = array_map(fn ($c) => self::normalizeCsvHeaderCell($c), $row);
+                    $physicalLine = $fixed;
+                    $afterBytePos = $lineEnd2 === false ? strlen($content) : $lineEnd2 + 1;
+                }
+            }
+        }
+
         if (! self::parsedRowIsRemainsTableHeader($normalized)) {
             return null;
         }
-
-        $afterBytePos = $lineEnd === false ? strlen($content) : $lineEnd + 1;
 
         return [
             'delimiter' => $delimiter,
             'after_byte_pos' => $afterBytePos,
             'header' => $normalized,
-            '_header_physical_line' => $line,
+            '_header_physical_line' => $physicalLine,
         ];
     }
 
