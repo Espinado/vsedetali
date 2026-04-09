@@ -253,7 +253,37 @@ final class RemainsStockCsvReader
             $content = str_replace('"Сумма'.$nl.'себестоимости"', '"Сумма себестоимости"', $content);
         }
 
+        $content = self::bruteMergeFirstSumCostQuotedFieldAcrossNewlines($content);
+
         return $content;
+    }
+
+    /**
+     * Последняя линия защиты: между "Сумма и себестоимости" только пробелы/переносы — склеиваем без preg (на случай невидимых байтов).
+     */
+    private static function bruteMergeFirstSumCostQuotedFieldAcrossNewlines(string $content): string
+    {
+        $open = '"Сумма';
+        $close = 'себестоимости"';
+        $p = strpos($content, $open);
+        if ($p === false) {
+            return $content;
+        }
+
+        $afterOpen = $p + strlen($open);
+        $q = strpos($content, $close, $afterOpen);
+        if ($q === false) {
+            return $content;
+        }
+
+        $between = substr($content, $afterOpen, $q - $afterOpen);
+        if ($between !== '' && ! preg_match('/^\s+$/u', $between)) {
+            return $content;
+        }
+
+        $merged = '"Сумма себестоимости"';
+
+        return substr($content, 0, $p).$merged.substr($content, $q + strlen($close));
     }
 
     /**
