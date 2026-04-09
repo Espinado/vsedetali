@@ -1294,6 +1294,7 @@ final class RemainsStockCsvReader
         $s = str_replace("\xC2\xA0", ' ', $s);
         $s = preg_replace('/[\x{200B}\x{FEFF}]/u', '', $s) ?? $s;
         $s = trim($s);
+        $s = self::mapKnownRemainsHeaderMojibake($s);
 
         if (self::headerCellIsKod($s) || self::headerCellIsArtikul($s) || self::headerCellIsNameColumn($s)) {
             return $s;
@@ -1305,6 +1306,19 @@ final class RemainsStockCsvReader
         }
 
         return $s;
+    }
+
+    /**
+     * Точечные замены известных «кракозябр» в шапке (UTF-8 прочитан как CP1251 и снова как UTF-8) — mb_convert не всегда восстанавливает.
+     */
+    private static function mapKnownRemainsHeaderMojibake(string $s): string
+    {
+        static $map = [
+            'РђСЂС‚РёРєСѓР' => 'Артикул',
+            'РљРѕРґ' => 'Код',
+        ];
+
+        return $map[$s] ?? $s;
     }
 
     /**
