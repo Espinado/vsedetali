@@ -22,11 +22,12 @@ final class RemainsStockCsvReader
     /**
      * Разобранная строка заголовка таблицы (колонки «Код», «Артикул», …).
      *
+     * @param  'utf-8'|'cp1251'|null  $csvEncoding  null = авто (UTF-8/UTF-16 + fallback cp1251); cp1251 = принудительно Windows-1251; utf-8 = без перекодирования из cp1251
      * @return list<string>
      */
-    public static function readHeaderRow(string $absolutePath): array
+    public static function readHeaderRow(string $absolutePath, ?string $csvEncoding = null): array
     {
-        [$handle, , , , $header] = self::openNormalizedCsvStream($absolutePath);
+        [$handle, , , , $header] = self::openNormalizedCsvStream($absolutePath, $csvEncoding);
         fclose($handle);
 
         return $header;
@@ -35,15 +36,16 @@ final class RemainsStockCsvReader
     /**
      * Строки данных после заголовка (включая строки-секции: пустой артикул).
      *
+     * @param  'utf-8'|'cp1251'|null  $csvEncoding  см. {@see readHeaderRow()}
      * @return \Generator<int, array<int, string>>
      */
-    public static function iterateDataRows(string $absolutePath): \Generator
+    public static function iterateDataRows(string $absolutePath, ?string $csvEncoding = null): \Generator
     {
         if (! is_readable($absolutePath)) {
             throw new \InvalidArgumentException("Файл недоступен: {$absolutePath}");
         }
 
-        [$handle, $delimiter, , $afterHeaderBytePos, ] = self::openNormalizedCsvStream($absolutePath);
+        [$handle, $delimiter, , $afterHeaderBytePos, ] = self::openNormalizedCsvStream($absolutePath, $csvEncoding);
 
         try {
             rewind($handle);
@@ -64,16 +66,30 @@ final class RemainsStockCsvReader
     }
 
     /**
+     * @param  'utf-8'|'cp1251'|null  $csvEncoding
      * @return array{0: resource, 1: string, 2: string, 3: int, 4: list<string>}
      */
-    public static function openNormalizedCsvStream(string $absolutePath): array
+    public static function openNormalizedCsvStream(string $absolutePath, ?string $csvEncoding = null): array
     {
         $raw = file_get_contents($absolutePath);
         if ($raw === false) {
             throw new \RuntimeException('Не удалось прочитать файл.');
         }
 
-        $asUtf8 = self::convertFileBytesToUtf8Text($raw);
+        if ($csvEncoding === 'cp1251') {
+            if (str_starts_with($raw, "\xEF\xBB\xBF")) {
+                $raw = substr($raw, 3);
+            }
+            $converted = @mb_convert_encoding($raw, 'UTF-8', 'Windows-1251');
+            if (! is_string($converted) || $converted === '') {
+                throw new \RuntimeException(
+                    'Режим --encoding=cp1251: не удалось перекодировать файл из Windows-1251 в UTF-8.'
+                );
+            }
+            $asUtf8 = $converted;
+        } else {
+            $asUtf8 = self::convertFileBytesToUtf8Text($raw);
+        }
         $preCollapse = self::preCollapseNormalize($asUtf8);
         $content = self::normalizeFileContentString($asUtf8);
 
@@ -104,7 +120,7 @@ final class RemainsStockCsvReader
             }
         }
 
-        if ($meta === null) {
+        if ($meta === null && $csvEncoding !== 'cp1251' && $csvEncoding !== 'utf-8') {
             $cp1251 = self::tryDecodeAsCp1251ThenNormalize($raw);
             if ($cp1251 !== null) {
                 $content = $cp1251;
@@ -115,8 +131,9 @@ final class RemainsStockCsvReader
         if ($meta === null) {
             throw new \RuntimeException(
                 'После разбора CSV не найдена строка заголовка с «Код» и «Артикул». '.
-                'Сохраните как «CSV UTF-8» или «CSV (разделители — запятые)» в Excel / LibreOffice. '.
+                'Сохраните как «CSV UTF-8 (разделители — запятые)» в Excel / LibreOffice. '.
                 'Поддерживаются разделители запятая, точка с запятой и табуляция. '.
+                'Если файл в кодировке Windows-1251 (часто «CSV разделители — точка с запятой»), выполните команду с опцией --encoding=cp1251. '.
                 'Если файл в UTF-16 — сохраните как UTF-8.'
             );
         }
@@ -138,7 +155,8 @@ final class RemainsStockCsvReader
      */
     private static function locateHeaderInNormalizedContent(string $content): ?array
     {
-        return self::locateHeaderByScanningFgetcsv($content)
+        return self::locateHeaderByPhysicalLineScan($content)
+            ?? self::locateHeaderByScanningFgetcsv($content)
             ?? self::locateHeaderByUtf8MarkerLine($content);
     }
 
@@ -363,24 +381,51 @@ final class RemainsStockCsvReader
         $hasKod = false;
         $hasArtikul = false;
         foreach ($cells as $cell) {
-            if ($cell === 'Код' || $cell === 'код') {
+            if (self::headerCellIsKod($cell)) {
                 $hasKod = true;
             }
-            if ($cell === 'Артикул' || $cell === 'артикул') {
+            if (self::headerCellIsArtikul($cell)) {
                 $hasArtikul = true;
-            }
-            if (function_exists('mb_strtolower')) {
-                $lc = @mb_strtolower($cell, 'UTF-8');
-                if ($lc === 'код') {
-                    $hasKod = true;
-                }
-                if ($lc === 'артикул') {
-                    $hasArtikul = true;
-                }
             }
         }
 
         return $hasKod && $hasArtikul;
+    }
+
+    /**
+     * Колонка «Код» / «Код номенклатуры» и т.п. (не путать со «Штрихкод» — не начинается с «код» как отдельное слово в начале для коротких форм).
+     */
+    private static function headerCellIsKod(string $cell): bool
+    {
+        $n = self::normalizeHeaderLabelForMatch($cell);
+        if ($n === '') {
+            return false;
+        }
+        $lc = mb_strtolower($n, 'UTF-8');
+
+        return $lc === 'код' || (preg_match('/^код(\s|$)/u', $lc) === 1 && mb_strlen($n) <= 64);
+    }
+
+    private static function headerCellIsArtikul(string $cell): bool
+    {
+        $n = self::normalizeHeaderLabelForMatch($cell);
+        if ($n === '') {
+            return false;
+        }
+        $lc = mb_strtolower($n, 'UTF-8');
+
+        return $lc === 'артикул' || (preg_match('/^артикул(\s|$)/u', $lc) === 1 && mb_strlen($n) <= 64);
+    }
+
+    private static function normalizeHeaderLabelForMatch(string $cell): string
+    {
+        $s = trim((string) $cell);
+        $s = str_replace("\xC2\xA0", ' ', $s);
+        $s = preg_replace('/[\x{200B}\x{FEFF}]/u', '', $s) ?? $s;
+        $s = trim($s);
+        $s = preg_replace('/[:：]$/u', '', $s) ?? $s;
+
+        return trim($s);
     }
 
     /**

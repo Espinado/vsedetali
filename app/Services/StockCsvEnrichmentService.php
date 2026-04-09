@@ -21,6 +21,7 @@ class StockCsvEnrichmentService
      *   only_skus_file?: string|null,
      *   write_not_found_list?: bool,
      *   not_found_output_path?: string|null,
+     *   csv_encoding?: 'utf-8'|'cp1251'|null,
      * }  $options
      * @return array{
      *   rows_total: int,
@@ -56,6 +57,11 @@ class StockCsvEnrichmentService
             : true;
         $notFoundCustom = isset($options['not_found_output_path']) ? trim((string) $options['not_found_output_path']) : '';
         $notFoundCustom = $notFoundCustom !== '' ? $notFoundCustom : null;
+
+        $csvEncoding = isset($options['csv_encoding']) ? $options['csv_encoding'] : null;
+        if ($csvEncoding !== null && $csvEncoding !== 'utf-8' && $csvEncoding !== 'cp1251') {
+            $csvEncoding = null;
+        }
 
         $resumeMap = $resumePath !== null && is_file($resumePath)
             ? $this->loadResumeRowsBySku($resumePath)
@@ -97,7 +103,7 @@ class StockCsvEnrichmentService
 
         fwrite($out, "\xEF\xBB\xBF");
 
-        $headerBase = RemainsStockCsvReader::readHeaderRow($inputAbsolutePath);
+        $headerBase = RemainsStockCsvReader::readHeaderRow($inputAbsolutePath, $csvEncoding);
 
         $extraHeaders = [
             'Категория (каталог)',
@@ -121,7 +127,7 @@ class StockCsvEnrichmentService
         fputcsv($out, array_merge($headerBase, $extraHeaders), ',');
 
         try {
-            foreach (RemainsStockCsvReader::iterateDataRows($inputAbsolutePath) as $row) {
+            foreach (RemainsStockCsvReader::iterateDataRows($inputAbsolutePath, $csvEncoding) as $row) {
                 $stats['rows_total']++;
 
                 $row = array_pad($row, 16, '');

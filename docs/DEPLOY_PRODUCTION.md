@@ -20,11 +20,26 @@ cd ~/public_html
 
 ## Импорт остатков (CSV UTF-8, отчёт «Остатки»)
 
-Файл **.xlsx** сначала сохрани в Excel как **CSV UTF-8**, залей на сервер (например в `storage/app/ostatki.csv`).
+Файл **.xlsx** сначала сохрани в Excel как **CSV UTF-8**, залей на сервер. Удобно класть CSV **в корень проекта** (рядом с `artisan`) или в `storage/app/` — путь в команде указывается **относительно корня Laravel** (не абсолютный путь).
 
 ```bash
-/usr/local/bin/php8.3 artisan import:remains-csv storage/app/ostatki.csv --dry-run
-/usr/local/bin/php8.3 artisan import:remains-csv storage/app/ostatki.csv
+cd ~/public_html   # или каталог, где лежит artisan
+
+/usr/local/bin/php8.3 artisan import:remains-csv ostatki.csv --dry-run
+/usr/local/bin/php8.3 artisan import:remains-csv ostatki.csv
+# пример с подпапкой:
+# php artisan import:remains-csv storage/app/ostatki.csv
+```
+
+Если при импорте или `stock:enrich-catalog` ошибка про строку заголовка «Код» / «Артикул», чаще всего файл в **Windows-1251** (типичный экспорт Excel «CSV (разделители — точка с запятой)»). Повторите с:
+
+`--encoding=cp1251`
+
+Обогащение CSV для анализа (только выходной файл, **без записи в БД**):
+
+```bash
+/usr/local/bin/php8.3 artisan stock:enrich-catalog ostatki.csv --sleep=200
+/usr/local/bin/php8.3 artisan stock:enrich-catalog ostatki.csv --sleep=200 --encoding=cp1251
 ```
 
 ## Каталог Geely «Бамбук»

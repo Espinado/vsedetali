@@ -12,7 +12,8 @@ class ImportRemainsStockCommand extends Command
     protected $signature = 'import:remains-csv
         {path : Путь к CSV (UTF-8), отчёт «Остатки»}
         {--dry-run : Без записи в БД}
-        {--catalog-images : Принудительно включить загрузку фото из каталога (по умолчанию уже включено, если не задано REMAINS_IMPORT_CATALOG_IMAGES=false)}';
+        {--catalog-images : Принудительно включить загрузку фото из каталога (по умолчанию уже включено, если не задано REMAINS_IMPORT_CATALOG_IMAGES=false)}
+        {--encoding=auto : Кодировка CSV: auto, utf-8, cp1251 (Windows-1251)}';
 
     protected $description = 'Импорт остатков из CSV «Остатки»: секции (Марки/, Производители/, DSLK, Б/У Дефект…), Доступно, себестоимость, цена; существующий SKU не обновляется';
 
@@ -38,8 +39,22 @@ class ImportRemainsStockCommand extends Command
 
         $downloadImagesOverride = (bool) $this->option('catalog-images');
 
+        $encOpt = strtolower(trim((string) $this->option('encoding')));
         try {
-            $stats = $service->import($path, $dryRun, $downloadImagesOverride ? true : null);
+            $csvEncoding = match ($encOpt) {
+                '', 'auto' => null,
+                'utf-8', 'utf8' => 'utf-8',
+                'cp1251', 'windows-1251', 'win1251' => 'cp1251',
+                default => throw new \InvalidArgumentException('encoding'),
+            };
+        } catch (\InvalidArgumentException) {
+            $this->error('Опция --encoding: допустимы auto, utf-8, cp1251.');
+
+            return self::FAILURE;
+        }
+
+        try {
+            $stats = $service->import($path, $dryRun, $downloadImagesOverride ? true : null, $csvEncoding);
         } catch (\Throwable $e) {
             $this->error($e->getMessage());
 

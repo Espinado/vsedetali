@@ -16,7 +16,8 @@ class EnrichStockCsvFromCatalogCommand extends Command
         {--resume-from= : Взять кэш строк из другого enriched CSV}
         {--only-skus-file= : API только для этих артикулов; остальные строки — из --resume или с пустыми доп. колонками (построчно UTF-8; # — комментарий)}
         {--not-found-output= : Куда писать список «не найдено» (по умолчанию рядом с -enriched.csv)}
-        {--no-not-found-list : Не создавать *-not-found.txt}';
+        {--no-not-found-list : Не создавать *-not-found.txt}
+        {--encoding=auto : Кодировка CSV: auto (UTF-8/UTF-16 + авто cp1251), utf-8, cp1251 (Windows-1251)}';
 
     protected $description = 'По артикулу из CSV «Остатки»: категория, производители OEM, аналоги (кросс), применимость к авто; строки без детали в каталоге не попадают в выходной файл';
 
@@ -82,15 +83,33 @@ class EnrichStockCsvFromCatalogCommand extends Command
                 : base_path(trim($notFoundOutRaw, '/\\'));
         }
 
+        $encOpt = strtolower(trim((string) $this->option('encoding')));
+        try {
+            $csvEncoding = match ($encOpt) {
+                '', 'auto' => null,
+                'utf-8', 'utf8' => 'utf-8',
+                'cp1251', 'windows-1251', 'win1251' => 'cp1251',
+                default => throw new \InvalidArgumentException('encoding'),
+            };
+        } catch (\InvalidArgumentException) {
+            $this->error('Опция --encoding: допустимы auto, utf-8, cp1251 (или windows-1251).');
+
+            return self::FAILURE;
+        }
+
         $options = [
             'resume_from_csv' => $resumeFrom,
             'only_skus_file' => $onlySkus,
             'write_not_found_list' => ! $this->option('no-not-found-list'),
             'not_found_output_path' => $notFoundOut,
+            'csv_encoding' => $csvEncoding,
         ];
 
         $this->info("Вход:  {$path}");
         $this->info("Выход: {$out}");
+        if ($csvEncoding !== null) {
+            $this->comment('Кодировка CSV: '.$csvEncoding);
+        }
         if ($resumeFrom !== null) {
             $this->comment("Продолжение с кэша: {$resumeFrom}");
         }

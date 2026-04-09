@@ -54,7 +54,10 @@ class RemainsStockCsvImportService
      *   catalog_storefront_categories: int,
      * }
      */
-    public function import(string $absolutePath, bool $dryRun = false, ?bool $downloadCatalogImages = null): array
+    /**
+     * @param  'utf-8'|'cp1251'|null  $csvEncoding  см. {@see RemainsStockCsvReader::readHeaderRow()}
+     */
+    public function import(string $absolutePath, bool $dryRun = false, ?bool $downloadCatalogImages = null, ?string $csvEncoding = null): array
     {
         if (! is_readable($absolutePath)) {
             throw new \InvalidArgumentException("Файл недоступен: {$absolutePath}");
@@ -111,7 +114,7 @@ class RemainsStockCsvImportService
             }
         }
 
-        foreach (RemainsStockCsvReader::iterateDataRows($absolutePath) as $row) {
+        foreach (RemainsStockCsvReader::iterateDataRows($absolutePath, $csvEncoding) as $row) {
             $stats['rows']++;
 
             $row = array_pad($row, 16, '');
