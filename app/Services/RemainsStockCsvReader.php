@@ -240,6 +240,11 @@ final class RemainsStockCsvReader
      */
     private static function mergeRemainsTypicalMultilineQuotedFields(string $content): string
     {
+        // Типичный баг 1С: строка шапки обрывается на «…Себестоимость,"Сумма», продолжение на следующей строке.
+        // Без склейки fgetcsv тянет «строку» до EOF — заголовок не находится.
+        $content = self::joinBrokenSumCostQuotedLines($content);
+
+        $content = preg_replace('/Себестоимость\s*,\s*"Сумма\s*\R\s*себестоимости"/ui', 'Себестоимость,"Сумма себестоимости"', $content) ?? $content;
         $content = preg_replace('/"Сумма\h*\R\h*себестоимости"/u', '"Сумма себестоимости"', $content) ?? $content;
         $content = preg_replace('/"Сумма\s*\R+\s*себестоимости"/u', '"Сумма себестоимости"', $content) ?? $content;
         $content = preg_replace('/"Сумма\s*\/\s*себестоимости"/u', '"Сумма себестоимости"', $content) ?? $content;
@@ -249,6 +254,25 @@ final class RemainsStockCsvReader
         }
 
         return $content;
+    }
+
+    /**
+     * Склеивает две физические строки, если первая заканчивается на открытую кавычку после «Сумма» (поле «Сумма себестоимости» разорвано).
+     */
+    private static function joinBrokenSumCostQuotedLines(string $content): string
+    {
+        $lines = explode("\n", str_replace("\r", '', $content));
+        $out = [];
+        for ($i = 0, $n = count($lines); $i < $n; $i++) {
+            $line = $lines[$i];
+            if ($i + 1 < $n && preg_match('/"Сумма\s*$/u', $line)) {
+                $line .= "\n".$lines[$i + 1];
+                $i++;
+            }
+            $out[] = $line;
+        }
+
+        return implode("\n", $out);
     }
 
     /**
