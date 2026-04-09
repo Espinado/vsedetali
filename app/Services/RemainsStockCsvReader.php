@@ -211,24 +211,101 @@ final class RemainsStockCsvReader
      */
     private static function findHeaderMetaAfterNormalize(string $asUtf8): ?array
     {
-        $preCollapsed = self::preCollapseNormalize($asUtf8);
+        $preCollapsed = self::mergeRemainsTypicalMultilineQuotedFields(self::preCollapseNormalize($asUtf8));
         $strict = self::normalizeFileContentString($asUtf8);
 
         // Важно: шапка часто разбита на две физические строки из‑за переноса внутри кавычек
-        // («Сумма» + newline + «себестоимости»). По одной физической строке str_getcsv даёт мусор;
-        // fgetcsv по потоку склеивает поле правильно. Сначала fgetcsv, сначала «мягкий» текст без collapse.
+        // («Сумма» + newline + «себестоимости»). Якорь ,Код,Артикул, + fgetcsv с позиции строки — надёжнее полного скана.
         $variants = [
             ['preCollapsed', $preCollapsed],
             ['strict', $strict],
         ];
 
         foreach ($variants as [, $blob]) {
-            $meta = self::locateHeaderByScanningFgetcsv($blob, 50_000)
+            $meta = self::locateHeaderByAnchorNeedleAndFgetcsv($blob)
+                ?? self::locateHeaderByScanningFgetcsv($blob, 50_000)
                 ?? self::locateHeaderByPhysicalLineScan($blob)
                 ?? self::locateHeaderByUtf8MarkerLine($blob);
             if ($meta !== null) {
                 return ['content' => $blob, 'meta' => $meta];
             }
+        }
+
+        return null;
+    }
+
+    /**
+     * Типичный баг выгрузки «Остатки»: перенос строки внутри "Сумма … себестоимости" в шапке.
+     * Должно выполняться до {@see collapseNewlinesInsideDoubleQuotedFields}.
+     */
+    private static function mergeRemainsTypicalMultilineQuotedFields(string $content): string
+    {
+        $content = preg_replace('/"Сумма\h*\R\h*себестоимости"/u', '"Сумма себестоимости"', $content) ?? $content;
+        $content = preg_replace('/"Сумма\s*\/\s*себестоимости"/u', '"Сумма себестоимости"', $content) ?? $content;
+        $content = preg_replace('/"Сумма\s+себестоимости"/u', '"Сумма себестоимости"', $content) ?? $content;
+        $content = str_replace('"Сумма'."\n".'себестоимости"', '"Сумма себестоимости"', $content);
+
+        return $content;
+    }
+
+    /**
+     * Находит начало строки с подстрокой «,Код,Артикул,» (или ; / таб), читает одну логическую запись fgetcsv — с переносами в кавычках.
+     *
+     * @return array{delimiter: string, after_byte_pos: int, header: list<string>}|null
+     */
+    private static function locateHeaderByAnchorNeedleAndFgetcsv(string $content): ?array
+    {
+        $needles = [
+            [',', ',Код,Артикул,'],
+            [';', ';Код;Артикул;'],
+            ["\t", "\tКод\tАртикул\t"],
+        ];
+
+        foreach ($needles as [$delimiter, $needle]) {
+            $at = strpos($content, $needle);
+            if ($at === false) {
+                continue;
+            }
+
+            $lineStart = strrpos(substr($content, 0, $at), "\n");
+            $lineStart = $lineStart === false ? 0 : $lineStart + 1;
+            $tail = substr($content, $lineStart);
+            if ($tail === '') {
+                continue;
+            }
+
+            $h = fopen('php://temp', 'r+b');
+            if ($h === false) {
+                continue;
+            }
+            fwrite($h, $tail);
+            rewind($h);
+            $row = self::readCsvRow($h, $delimiter);
+            fclose($h);
+            if ($row === false) {
+                continue;
+            }
+
+            $normalized = array_map(fn ($c) => self::normalizeCsvHeaderCell($c), $row);
+            if (! self::parsedRowIsRemainsTableHeader($normalized)) {
+                continue;
+            }
+
+            $h = fopen('php://temp', 'r+b');
+            if ($h === false) {
+                continue;
+            }
+            fwrite($h, $tail);
+            rewind($h);
+            self::readCsvRow($h, $delimiter);
+            $consumed = ftell($h);
+            fclose($h);
+
+            return [
+                'delimiter' => $delimiter,
+                'after_byte_pos' => $lineStart + (int) $consumed,
+                'header' => $normalized,
+            ];
         }
 
         return null;
@@ -653,12 +730,9 @@ final class RemainsStockCsvReader
     private static function normalizeFileContentString(string $bytes): string
     {
         $content = self::preCollapseNormalize($bytes);
+        $content = self::mergeRemainsTypicalMultilineQuotedFields($content);
 
         $content = self::collapseNewlinesInsideDoubleQuotedFields($content);
-
-        $content = preg_replace('/"Сумма\s*\/\s*себестоимости"/u', '"Сумма себестоимости"', $content) ?? $content;
-        $content = preg_replace('/"Сумма\s+себестоимости"/u', '"Сумма себестоимости"', $content) ?? $content;
-        $content = str_replace('"Сумма'."\n".'себестоимости"', '"Сумма себестоимости"', $content);
 
         return $content;
     }
