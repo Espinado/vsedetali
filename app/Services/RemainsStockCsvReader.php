@@ -34,6 +34,53 @@ final class RemainsStockCsvReader
     }
 
     /**
+     * Первые N физических строк файла в UTF-8 (для {@see \App\Console\Commands\RemainsCsvInspectCommand}).
+     *
+     * @return list<string>
+     */
+    public static function diagnosticUtf8Lines(string $absolutePath, ?string $csvEncoding, int $maxLines = 15): array
+    {
+        $raw = file_get_contents($absolutePath);
+        if ($raw === false || $raw === '') {
+            return ['(файл пуст или не прочитан)'];
+        }
+
+        $tryUtf = static fn (): string => self::convertFileBytesToUtf8Text($raw);
+        $tryCp = static function () use ($raw): string {
+            $t = self::tryDecodeRawBytesToUtf8Cp1251($raw);
+            if ($t === null) {
+                throw new \RuntimeException('cp1251');
+            }
+
+            return $t;
+        };
+
+        $chains = match ($csvEncoding) {
+            'cp1251' => [$tryCp, $tryUtf],
+            'utf-8' => [$tryUtf, $tryCp],
+            default => [$tryUtf, $tryCp],
+        };
+
+        $text = '';
+        foreach ($chains as $getUtf) {
+            try {
+                $text = $getUtf();
+                break;
+            } catch (\Throwable) {
+                continue;
+            }
+        }
+        if ($text === '') {
+            $text = $tryUtf();
+        }
+
+        $text = str_replace(["\r\n", "\r"], "\n", $text);
+        $lines = explode("\n", $text);
+
+        return array_slice(array_map(static fn ($l) => (string) $l, $lines), 0, max(1, $maxLines));
+    }
+
+    /**
      * Строки данных после заголовка (включая строки-секции: пустой артикул).
      *
      * @param  'utf-8'|'cp1251'|null  $csvEncoding  см. {@see readHeaderRow()}
@@ -80,12 +127,10 @@ final class RemainsStockCsvReader
 
         if ($result === null) {
             throw new \RuntimeException(
-                'После разбора CSV не найдена строка заголовка с колонками «Код» и «Артикул» '.
-                '(или эквивалентами: Code, Article, Part number и т.п.). '.
-                'Сохраните как «CSV UTF-8» в Excel / LibreOffice. '.
-                'Поддерживаются разделители: запятая, точка с запятой, табуляция, вертикальная черта. '.
-                'Попробуйте без --encoding, с --encoding=cp1251 или с --encoding=utf-8. '.
-                'Если сверху таблицы много служебных строк — убедитесь, что в одной строке есть оба заголовка.'
+                'После разбора CSV не найдена строка заголовка: нужны «Код»+«Артикул» или «Артикул»+«Наименование»/«Номенклатура» '.
+                '(либо Code/Article/Name и т.п.). '.
+                'Сохраните как «CSV UTF-8» в Excel / LibreOffice. Разделители: запятая, точка с запятой, табуляция, |. '.
+                'Попробуйте php artisan remains-csv:inspect "ваш.csv". '
             );
         }
 
@@ -317,7 +362,11 @@ final class RemainsStockCsvReader
             $utf8Artikul = "\xD0\x90\xD1\x80\xD1\x82\xD0\xB8\xD0\xBA\xD1\x83\xD0\xBB";
             $hasKod = str_contains($line, 'Код') || str_contains($line, $utf8Kod);
             $hasArtikul = str_contains($line, 'Артикул') || str_contains($line, $utf8Artikul);
-            if (! $hasKod || ! $hasArtikul) {
+            $hasName = str_contains($line, 'Наименование')
+                || str_contains($line, 'Номенклатура')
+                || str_contains($line, 'Название');
+            $looksLikeHeader = ($hasKod && $hasArtikul) || ($hasArtikul && $hasName);
+            if (! $looksLikeHeader) {
                 $pos = $afterPos;
 
                 continue;
@@ -453,6 +502,7 @@ final class RemainsStockCsvReader
     {
         $hasKod = false;
         $hasArtikul = false;
+        $hasName = false;
         foreach ($cells as $cell) {
             if (self::headerCellIsKod($cell)) {
                 $hasKod = true;
@@ -460,9 +510,40 @@ final class RemainsStockCsvReader
             if (self::headerCellIsArtikul($cell)) {
                 $hasArtikul = true;
             }
+            if (self::headerCellIsNameColumn($cell)) {
+                $hasName = true;
+            }
         }
 
-        return $hasKod && $hasArtikul;
+        // Классический отчёт: «Код» + «Артикул». Часто в 1С/Excel: «Артикул» + «Наименование» без колонки «Код».
+        return ($hasKod && $hasArtikul) || ($hasArtikul && $hasName);
+    }
+
+    /**
+     * Колонка наименования номенклатуры (типичная шапка «Остатки» без поля «Код»).
+     */
+    private static function headerCellIsNameColumn(string $cell): bool
+    {
+        $n = self::normalizeHeaderLabelForMatch($cell);
+        if ($n === '') {
+            return false;
+        }
+        $lc = mb_strtolower($n, 'UTF-8');
+
+        if ($lc === 'наименование' || (preg_match('/^наименование(\s|$)/u', $lc) === 1 && mb_strlen($n) <= 80)) {
+            return true;
+        }
+        if ($lc === 'номенклатура' || (preg_match('/^номенклатура(\s|$)/u', $lc) === 1 && mb_strlen($n) <= 80)) {
+            return true;
+        }
+        if ($lc === 'название' || (preg_match('/^название(\s|$)/u', $lc) === 1 && mb_strlen($n) <= 64)) {
+            return true;
+        }
+
+        $ascii = strtolower(preg_replace('/\s+/u', ' ', $n) ?? $n);
+
+        return $ascii === 'name' || $ascii === 'description'
+            || preg_match('/^(name|description|item)(\s|$)/i', $ascii) === 1;
     }
 
     /**
@@ -494,6 +575,11 @@ final class RemainsStockCsvReader
         $lc = mb_strtolower($n, 'UTF-8');
 
         if ($lc === 'артикул' || (preg_match('/^артикул(\s|$)/u', $lc) === 1 && mb_strlen($n) <= 64)) {
+            return true;
+        }
+
+        // «Артикул поставщика», «Артикул / код», одна ячейка
+        if (preg_match('/^артикул\b/u', $lc) === 1 && mb_strlen($n) <= 96) {
             return true;
         }
 
