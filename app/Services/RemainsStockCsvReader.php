@@ -211,41 +211,27 @@ final class RemainsStockCsvReader
      */
     private static function findHeaderMetaAfterNormalize(string $asUtf8): ?array
     {
-        $preCollapse = self::preCollapseNormalize($asUtf8);
-        $content = self::normalizeFileContentString($asUtf8);
+        $preCollapsed = self::preCollapseNormalize($asUtf8);
+        $strict = self::normalizeFileContentString($asUtf8);
 
-        $meta = self::locateHeaderByPhysicalLineScan($content)
-            ?? self::locateHeaderByUtf8MarkerLine($content)
-            ?? self::locateHeaderByScanningFgetcsv($content, 50_000);
+        // Важно: шапка часто разбита на две физические строки из‑за переноса внутри кавычек
+        // («Сумма» + newline + «себестоимости»). По одной физической строке str_getcsv даёт мусор;
+        // fgetcsv по потоку склеивает поле правильно. Сначала fgetcsv, сначала «мягкий» текст без collapse.
+        $variants = [
+            ['preCollapsed', $preCollapsed],
+            ['strict', $strict],
+        ];
 
-        if ($meta === null) {
-            $meta = self::locateHeaderByPhysicalLineScan($preCollapse)
-                ?? self::locateHeaderByUtf8MarkerLine($preCollapse)
-                ?? self::locateHeaderByScanningFgetcsv($preCollapse, 50_000);
+        foreach ($variants as [, $blob]) {
+            $meta = self::locateHeaderByScanningFgetcsv($blob, 50_000)
+                ?? self::locateHeaderByPhysicalLineScan($blob)
+                ?? self::locateHeaderByUtf8MarkerLine($blob);
             if ($meta !== null) {
-                if (isset($meta['_header_physical_line'])) {
-                    $meta = self::relocateHeaderMetaUsingPhysicalLine($content, $meta)
-                        ?? self::locateHeaderByPhysicalLineScan($content)
-                        ?? self::locateHeaderByUtf8MarkerLine($content)
-                        ?? self::locateHeaderByScanningFgetcsv($content, 50_000);
-                } else {
-                    $pos = $meta['after_byte_pos'];
-                    $prefixOk = $pos <= strlen($preCollapse) && $pos <= strlen($content)
-                        && substr($preCollapse, 0, $pos) === substr($content, 0, $pos);
-                    if (! $prefixOk) {
-                        $meta = self::locateHeaderByPhysicalLineScan($content)
-                            ?? self::locateHeaderByScanningFgetcsv($content, 50_000)
-                            ?? $meta;
-                    }
-                }
+                return ['content' => $blob, 'meta' => $meta];
             }
         }
 
-        if ($meta === null) {
-            return null;
-        }
-
-        return ['content' => $content, 'meta' => $meta];
+        return null;
     }
 
     /**
@@ -273,8 +259,8 @@ final class RemainsStockCsvReader
      */
     private static function locateHeaderInNormalizedContent(string $content): ?array
     {
-        return self::locateHeaderByPhysicalLineScan($content)
-            ?? self::locateHeaderByScanningFgetcsv($content)
+        return self::locateHeaderByScanningFgetcsv($content, 50_000)
+            ?? self::locateHeaderByPhysicalLineScan($content)
             ?? self::locateHeaderByUtf8MarkerLine($content);
     }
 
