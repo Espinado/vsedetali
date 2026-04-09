@@ -71,10 +71,14 @@ class ProductsSyncCatalogVehiclesCommand extends Command
                 }
                 $enriched = $catalog->lookupEnrichedForStockWithCandidates((string) $product->sku, $codeAlt);
                 $attachedTotal += $vehicleSync->attachFromEnrichment($product, $enriched);
-                $meta = $metadataSync->syncFromEnrichment($product->fresh(), $enriched);
+                $fresh = $product->fresh();
+                $meta = $metadataSync->syncFromEnrichment($fresh, $enriched);
                 $oemExtra += $meta['oem_added'];
                 $cross += $meta['cross_added'];
                 $attrs += $meta['attributes_upserted'];
+                if ($metadataSync->assignStorefrontCategoryFromEnrichment($fresh, $enriched)) {
+                    $storefrontCat++;
+                }
             } catch (\Throwable $e) {
                 $errors++;
                 $this->warn("SKU {$product->sku}: {$e->getMessage()}");
