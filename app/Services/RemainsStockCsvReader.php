@@ -227,10 +227,12 @@ final class RemainsStockCsvReader
         ];
 
         foreach ($variants as [, $blob]) {
+            // Сначала якорь и построчный разбор — не зависят от «съеденных» fgetcsv строк из-за кавычки в шапке отчёта (стр. 1–7).
+            // Полный проход fgetcsv с начала файла — в конце: при нечётных кавычках в преамбуле логические строки смещаются.
             $meta = self::locateHeaderByAnchorNeedleAndFgetcsv($blob)
-                ?? self::locateHeaderByScanningFgetcsv($blob, 50_000)
                 ?? self::locateHeaderByPhysicalLineScan($blob)
-                ?? self::locateHeaderByUtf8MarkerLine($blob);
+                ?? self::locateHeaderByUtf8MarkerLine($blob)
+                ?? self::locateHeaderByScanningFgetcsv($blob, 50_000);
             if ($meta !== null) {
                 return ['content' => $blob, 'meta' => $meta];
             }
@@ -640,21 +642,25 @@ final class RemainsStockCsvReader
             $tail = self::stitchRemainsBrokenHeaderLinePair($tail);
             $tail = self::mergeRemainsTypicalMultilineQuotedFields($tail);
 
-            $h = fopen('php://temp', 'r+b');
-            if ($h === false) {
-                continue;
-            }
-            fwrite($h, $tail);
-            rewind($h);
-            $row = self::readCsvRow($h, $delimiter);
-            fclose($h);
-            if ($row === false) {
-                continue;
-            }
-
-            $normalized = array_map(fn ($c) => self::normalizeCsvHeaderCell($c), $row);
-            if (! self::parsedRowIsRemainsTableHeader($normalized)) {
-                continue;
+            $firstNl = strpos($tail, "\n");
+            $firstLine = $firstNl === false ? $tail : substr($tail, 0, $firstNl);
+            $normalized = self::parseHeaderRowWithCsvFallbacks($firstLine, $delimiter);
+            if ($normalized === null) {
+                $h = fopen('php://temp', 'r+b');
+                if ($h === false) {
+                    continue;
+                }
+                fwrite($h, $tail);
+                rewind($h);
+                $row = self::readCsvRow($h, $delimiter);
+                fclose($h);
+                if ($row === false) {
+                    continue;
+                }
+                $normalized = array_map(fn ($c) => self::normalizeCsvHeaderCell($c), $row);
+                if (! self::parsedRowIsRemainsTableHeader($normalized)) {
+                    continue;
+                }
             }
 
             $h = fopen('php://temp', 'r+b');
@@ -702,9 +708,9 @@ final class RemainsStockCsvReader
      */
     private static function locateHeaderInNormalizedContent(string $content): ?array
     {
-        return self::locateHeaderByScanningFgetcsv($content, 50_000)
-            ?? self::locateHeaderByPhysicalLineScan($content)
-            ?? self::locateHeaderByUtf8MarkerLine($content);
+        return self::locateHeaderByPhysicalLineScan($content)
+            ?? self::locateHeaderByUtf8MarkerLine($content)
+            ?? self::locateHeaderByScanningFgetcsv($content, 50_000);
     }
 
     /**
@@ -803,12 +809,8 @@ final class RemainsStockCsvReader
 
             $tryDelims = [',', ';', "\t", '|'];
             foreach ($tryDelims as $d) {
-                $row = self::strGetCsvRow($line, $d);
-                if ($row === []) {
-                    continue;
-                }
-                $normalized = array_map(fn ($c) => self::normalizeCsvHeaderCell($c), $row);
-                if (self::parsedRowIsRemainsTableHeader($normalized)) {
+                $normalized = self::parseHeaderRowWithCsvFallbacks($line, $d);
+                if ($normalized !== null) {
                     return [
                         'delimiter' => $d,
                         'after_byte_pos' => $afterPos,
@@ -890,16 +892,11 @@ final class RemainsStockCsvReader
             ? substr($content, $lineStart)
             : substr($content, $lineStart, $lineEnd - $lineStart);
 
-        $row = self::strGetCsvRow($line, $delimiter);
-        if ($row === []) {
-            return null;
-        }
-
-        $normalized = array_map(fn ($c) => self::normalizeCsvHeaderCell($c), $row);
+        $normalized = self::parseHeaderRowWithCsvFallbacks($line, $delimiter);
         $afterBytePos = $lineEnd === false ? strlen($content) : $lineEnd + 1;
         $physicalLine = $line;
 
-        if (! self::parsedRowIsRemainsTableHeader($normalized) && $lineEnd !== false) {
+        if ($normalized === null && $lineEnd !== false) {
             $lineEnd2 = strpos($content, "\n", $lineEnd + 1);
             $nextLine = $lineEnd2 === false
                 ? substr($content, $lineEnd + 1)
@@ -907,16 +904,15 @@ final class RemainsStockCsvReader
             $extended = $line."\n".$nextLine;
             $fixed = self::collapseRemainsSumCostTwoLineFragment($extended);
             if ($fixed !== $extended) {
-                $row = self::strGetCsvRow($fixed, $delimiter);
-                if ($row !== []) {
-                    $normalized = array_map(fn ($c) => self::normalizeCsvHeaderCell($c), $row);
+                $normalized = self::parseHeaderRowWithCsvFallbacks($fixed, $delimiter);
+                if ($normalized !== null) {
                     $physicalLine = $fixed;
                     $afterBytePos = $lineEnd2 === false ? strlen($content) : $lineEnd2 + 1;
                 }
             }
         }
 
-        if (! self::parsedRowIsRemainsTableHeader($normalized)) {
+        if ($normalized === null) {
             return null;
         }
 
@@ -926,6 +922,79 @@ final class RemainsStockCsvReader
             'header' => $normalized,
             '_header_physical_line' => $physicalLine,
         ];
+    }
+
+    /**
+     * Одна физическая строка CSV: несколько вариантов str_getcsv (PHP 8.3/8.4 отличаются escape) + RFC4180 без escape.
+     *
+     * @return list<string>|null
+     */
+    private static function parseHeaderRowWithCsvFallbacks(string $line, string $delimiter): ?array
+    {
+        $line = str_replace("\r", '', (string) $line);
+
+        $candidates = [];
+        if (PHP_VERSION_ID >= 80400) {
+            $candidates[] = str_getcsv($line, $delimiter, '"', '\\');
+            $candidates[] = str_getcsv($line, $delimiter, '"', '');
+        } else {
+            $candidates[] = str_getcsv($line, $delimiter, '"');
+        }
+        $candidates[] = self::splitCsvLineRfc4180DoubleQuoteOnly($line, $delimiter);
+
+        foreach ($candidates as $row) {
+            if (! is_array($row) || $row === []) {
+                continue;
+            }
+            $normalized = array_map(fn ($c) => self::normalizeCsvHeaderCell($c), $row);
+            if (self::parsedRowIsRemainsTableHeader($normalized)) {
+                return $normalized;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * RFC 4180: поля в двойных кавычках, удвоение кавычек внутри. Без escape-символа (в отличие от fgetcsv со «\»).
+     *
+     * @return list<string>
+     */
+    private static function splitCsvLineRfc4180DoubleQuoteOnly(string $line, string $delimiter): array
+    {
+        if (strlen($delimiter) !== 1) {
+            return [];
+        }
+
+        $d = $delimiter;
+        $out = [];
+        $field = '';
+        $inQuotes = false;
+        $len = strlen($line);
+        for ($i = 0; $i < $len; $i++) {
+            $c = $line[$i];
+            if ($c === '"') {
+                if ($inQuotes && $i + 1 < $len && $line[$i + 1] === '"') {
+                    $field .= '"';
+                    $i++;
+
+                    continue;
+                }
+                $inQuotes = ! $inQuotes;
+
+                continue;
+            }
+            if (! $inQuotes && $c === $d) {
+                $out[] = $field;
+                $field = '';
+
+                continue;
+            }
+            $field .= $c;
+        }
+        $out[] = $field;
+
+        return $out;
     }
 
     /**
