@@ -316,9 +316,10 @@ final class RemainsStockCsvReader
 
     private static function collapseRemainsSumCostTwoLineFragment(string $pair): string
     {
-        // Якорь по байтам UTF-8: ' + «Сумма» + перевод строки + «себестоимости» + ' — без зависимости от \R/PCRE в других ветках.
+        // Якорь по байтам UTF-8: ' + «Сумма» + перевод строки + «себестоимости» + '.
+        // Важно: шаблон в двойных кавычках PHP — иначе в одинарных \xDD не станет байтом и совпадений не будет.
         $s = preg_replace(
-            '/\'\xD0\xA1\xD1\x83\xD0\xBC\xD0\xBC\xD0\xB0(?:\r\n|\n|\r)\xD1\x81\xD0\xB5\xD0\xB1\xD0\xB5\xD1\x81\xD1\x82\xD0\xBE\xD0\xB8\xD0\xBC\xD0\xBE\xD1\x81\xD1\x82\xD0\xB8\'/u',
+            "/'\xD0\xA1\xD1\x83\xD0\xBC\xD0\xBC\xD0\xB0(?:\r\n|\n|\r)\xD1\x81\xD0\xB5\xD0\xB1\xD0\xB5\xD1\x81\xD1\x82\xD0\xBE\xD0\xB8\xD0\xBC\xD0\xBE\xD1\x81\xD1\x82\xD0\xB8'/u",
             '"Сумма себестоимости"',
             $pair
         ) ?? $pair;
