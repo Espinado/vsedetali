@@ -241,16 +241,22 @@ final class RemainsStockCsvReader
     private static function mergeRemainsTypicalMultilineQuotedFields(string $content): string
     {
         // Типичный баг 1С: строка шапки обрывается на «…Себестоимость,"Сумма», продолжение на следующей строке.
+        // LibreOffice часто сохраняет поле в одинарных кавычках '…' — для fgetcsv важны двойные "…".
         // Без склейки fgetcsv тянет «строку» до EOF — заголовок не находится.
         $content = self::joinBrokenSumCostQuotedLines($content);
 
         $content = preg_replace('/Себестоимость\s*,\s*"Сумма\s*\R\s*себестоимости"/ui', 'Себестоимость,"Сумма себестоимости"', $content) ?? $content;
+        $content = preg_replace('/Себестоимость\s*,\s*\'Сумма\s*\R\s*себестоимости\'/ui', 'Себестоимость,"Сумма себестоимости"', $content) ?? $content;
         $content = preg_replace('/"Сумма\h*\R\h*себестоимости"/u', '"Сумма себестоимости"', $content) ?? $content;
+        $content = preg_replace('/\'Сумма\h*\R\h*себестоимости\'/u', '"Сумма себестоимости"', $content) ?? $content;
         $content = preg_replace('/"Сумма\s*\R+\s*себестоимости"/u', '"Сумма себестоимости"', $content) ?? $content;
+        $content = preg_replace('/\'Сумма\s*\R+\s*себестоимости\'/u', '"Сумма себестоимости"', $content) ?? $content;
         $content = preg_replace('/"Сумма\s*\/\s*себестоимости"/u', '"Сумма себестоимости"', $content) ?? $content;
         $content = preg_replace('/"Сумма\s+себестоимости"/u', '"Сумма себестоимости"', $content) ?? $content;
+        $content = preg_replace('/Себестоимость\s*,\s*\'Сумма\s+себестоимости\'/u', 'Себестоимость,"Сумма себестоимости"', $content) ?? $content;
         foreach (["\r\n", "\r", "\n"] as $nl) {
             $content = str_replace('"Сумма'.$nl.'себестоимости"', '"Сумма себестоимости"', $content);
+            $content = str_replace("'Сумма".$nl."себестоимости'", '"Сумма себестоимости"', $content);
         }
 
         $content = self::bruteMergeFirstSumCostQuotedFieldAcrossNewlines($content);
@@ -263,27 +269,29 @@ final class RemainsStockCsvReader
      */
     private static function bruteMergeFirstSumCostQuotedFieldAcrossNewlines(string $content): string
     {
-        $open = '"Сумма';
-        $close = 'себестоимости"';
-        $p = strpos($content, $open);
-        if ($p === false) {
-            return $content;
+        foreach ([['"Сумма', 'себестоимости"'], ["'Сумма", "себестоимости'"]] as [$open, $close]) {
+            $p = strpos($content, $open);
+            if ($p === false) {
+                continue;
+            }
+
+            $afterOpen = $p + strlen($open);
+            $q = strpos($content, $close, $afterOpen);
+            if ($q === false) {
+                continue;
+            }
+
+            $between = substr($content, $afterOpen, $q - $afterOpen);
+            if ($between !== '' && ! preg_match('/^\s+$/u', $between)) {
+                continue;
+            }
+
+            $merged = '"Сумма себестоимости"';
+
+            return substr($content, 0, $p).$merged.substr($content, $q + strlen($close));
         }
 
-        $afterOpen = $p + strlen($open);
-        $q = strpos($content, $close, $afterOpen);
-        if ($q === false) {
-            return $content;
-        }
-
-        $between = substr($content, $afterOpen, $q - $afterOpen);
-        if ($between !== '' && ! preg_match('/^\s+$/u', $between)) {
-            return $content;
-        }
-
-        $merged = '"Сумма себестоимости"';
-
-        return substr($content, 0, $p).$merged.substr($content, $q + strlen($close));
+        return $content;
     }
 
     /**
@@ -295,7 +303,7 @@ final class RemainsStockCsvReader
         $out = [];
         for ($i = 0, $n = count($lines); $i < $n; $i++) {
             $line = $lines[$i];
-            if ($i + 1 < $n && preg_match('/"Сумма\s*$/u', $line)) {
+            if ($i + 1 < $n && (preg_match('/"Сумма\s*$/u', $line) || preg_match('/\'Сумма\s*$/u', $line))) {
                 $line .= "\n".$lines[$i + 1];
                 $i++;
             }
