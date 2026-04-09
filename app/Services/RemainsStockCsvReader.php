@@ -212,6 +212,7 @@ final class RemainsStockCsvReader
     private static function findHeaderMetaAfterNormalize(string $asUtf8): ?array
     {
         $pre = self::preCollapseNormalize($asUtf8);
+        $pre = self::repairRemainsHeaderAfterUtf8KodArtikulMarker($pre);
         $pre = self::stitchRemainsBrokenHeaderLinePair($pre);
         $preCollapsed = self::mergeRemainsTypicalMultilineQuotedFields($pre);
         $strict = self::normalizeFileContentString($asUtf8);
@@ -273,15 +274,71 @@ final class RemainsStockCsvReader
             return substr($normalized, 0, $start).$fixed;
         }
 
-        return $content;
+        return $normalized;
+    }
+
+    /**
+     * Находит в файле UTF-8 последовательность «,Код,Артикул,» и чинит типичный разрыв «'Сумма» + перевод строки + «себестоимости'» в первых двух строках шапки.
+     * Не использует литералы «Код» из исходников — только байты UTF-8 (на случай странностей окружения).
+     */
+    private static function repairRemainsHeaderAfterUtf8KodArtikulMarker(string $content): string
+    {
+        $marker = ",\xD0\x9A\xD0\xBE\xD0\xB4\x2C\xD0\x90\xD1\x80\xD1\x82\xD0\xB8\xD0\xBA\xD1\x83\xD0\xBB\x2C";
+        $p = strpos($content, $marker);
+        if ($p === false) {
+            return $content;
+        }
+
+        $lineStart = strrpos(substr($content, 0, $p), "\n");
+        $lineStart = $lineStart === false ? 0 : $lineStart + 1;
+        $e1 = strpos($content, "\n", $lineStart);
+        if ($e1 === false) {
+            return $content;
+        }
+        $e2 = strpos($content, "\n", $e1 + 1);
+        $blockEnd = $e2 === false ? strlen($content) : $e2;
+        $block = substr($content, $lineStart, $blockEnd - $lineStart);
+
+        $fixed = self::collapseRemainsSumCostTwoLineFragment($block);
+        if ($fixed === $block) {
+            $fixed = preg_replace(
+                '/[\'\x{2018}\x{2019}]\s*Сумма\s*\R+\s*себестоимости\s*[\'\x{2018}\x{2019}]/u',
+                '"Сумма себестоимости"',
+                $block
+            ) ?? $block;
+        }
+        if ($fixed === $block) {
+            return $content;
+        }
+
+        return substr($content, 0, $lineStart).$fixed.substr($content, $lineStart + strlen($block));
     }
 
     private static function collapseRemainsSumCostTwoLineFragment(string $pair): string
     {
+        // Якорь по байтам UTF-8: ' + «Сумма» + перевод строки + «себестоимости» + ' — без зависимости от \R/PCRE в других ветках.
+        $s = preg_replace(
+            '/\'\xD0\xA1\xD1\x83\xD0\xBC\xD0\xBC\xD0\xB0(?:\r\n|\n|\r)\xD1\x81\xD0\xB5\xD0\xB1\xD0\xB5\xD1\x81\xD1\x82\xD0\xBE\xD0\xB8\xD0\xBC\xD0\xBE\xD1\x81\xD1\x82\xD0\xB8\'/u',
+            '"Сумма себестоимости"',
+            $pair
+        ) ?? $pair;
+        if ($s !== $pair) {
+            return $s;
+        }
+
         foreach (["'Сумма\nсебестоимости'", "'Сумма\r\nсебестоимости'", "'Сумма\rсебестоимости'"] as $lit) {
             if (str_contains($pair, $lit)) {
                 return str_replace($lit, '"Сумма себестоимости"', $pair);
             }
+        }
+
+        $s = preg_replace(
+            '/[\'\x{2018}\x{2019}]\s*Сумма\s*\R+\s*себестоимости\s*[\'\x{2018}\x{2019}]/u',
+            '"Сумма себестоимости"',
+            $pair
+        ) ?? $pair;
+        if ($s !== $pair) {
+            return $s;
         }
 
         // Запятая ASCII или fullwidth U+FF0C (Excel) после закрывающей кавычки.
@@ -994,6 +1051,7 @@ final class RemainsStockCsvReader
     private static function normalizeFileContentString(string $bytes): string
     {
         $content = self::preCollapseNormalize($bytes);
+        $content = self::repairRemainsHeaderAfterUtf8KodArtikulMarker($content);
         $content = self::stitchRemainsBrokenHeaderLinePair($content);
         $content = self::mergeRemainsTypicalMultilineQuotedFields($content);
 
