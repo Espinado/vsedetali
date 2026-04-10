@@ -18,6 +18,10 @@ return Application::configure(basePath: dirname(__DIR__))
         // Laragon / nginx за HTTPS: корректный Request::secure() и сессия для /broadcasting/auth
         $middleware->trustProxies(at: '*');
 
+        $middleware->web(append: [
+            \App\Http\Middleware\SetLocaleForSellerPanel::class,
+        ]);
+
         $middleware->alias([
             'customer.not.blocked' => \App\Http\Middleware\EnsureCustomerNotBlocked::class,
         ]);

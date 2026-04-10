@@ -21,7 +21,10 @@ class DatabaseSeeder extends Seeder
             RolePermissionSeeder::class,
             SellerStaffRoleSeeder::class,
             DemoCustomersSeeder::class,
-            TestSellerSeeder::class,
         ]);
+
+        if (app()->environment(['local', 'testing'])) {
+            $this->call(TestSellerSeeder::class);
+        }
     }
 }

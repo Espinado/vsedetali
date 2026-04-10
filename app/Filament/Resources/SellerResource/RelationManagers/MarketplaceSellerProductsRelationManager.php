@@ -1,34 +1,40 @@
 <?php
 
-namespace App\Filament\Resources\WarehouseResource\RelationManagers;
+namespace App\Filament\Resources\SellerResource\RelationManagers;
 
 use App\Filament\Resources\ProductResource;
+use App\Filament\Resources\SellerResource;
 use App\Models\SellerProduct;
 use Filament\Resources\RelationManagers\RelationManager;
 use Filament\Tables;
 use Filament\Tables\Table;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 
 class MarketplaceSellerProductsRelationManager extends RelationManager
 {
-    protected static string $relationship = 'marketplaceSellerProducts';
+    protected static string $relationship = 'sellerProducts';
 
-    protected static ?string $title = 'Товары продавца на площадке';
+    protected static ?string $title = 'Товары на площадке';
 
     public static function canViewForRecord(Model $ownerRecord, string $pageClass): bool
     {
-        return $ownerRecord instanceof \App\Models\Warehouse && $ownerRecord->seller_id !== null;
+        return SellerResource::canViewAny();
     }
 
     public function table(Table $table): Table
     {
         return $table
+            ->modifyQueryUsing(fn (Builder $query): Builder => $query->with(['product', 'warehouse']))
             ->columns([
                 Tables\Columns\TextColumn::make('product.name')
                     ->label('Товар')
                     ->searchable(),
                 Tables\Columns\TextColumn::make('product.sku')
                     ->label('SKU'),
+                Tables\Columns\TextColumn::make('warehouse.name')
+                    ->label('Склад')
+                    ->placeholder('—'),
                 Tables\Columns\TextColumn::make('price')
                     ->label('Цена'),
                 Tables\Columns\TextColumn::make('quantity')
@@ -64,7 +70,10 @@ class MarketplaceSellerProductsRelationManager extends RelationManager
                     ->color('success')
                     ->requiresConfirmation()
                     ->visible(fn (SellerProduct $record): bool => $record->status === 'pending')
-                    ->action(fn (SellerProduct $record) => $record->update(['status' => 'active'])),
+                    ->action(function (SellerProduct $record): void {
+                        $record->update(['status' => 'active']);
+                        $record->product?->update(['is_active' => true]);
+                    }),
             ])
             ->bulkActions([
                 Tables\Actions\BulkActionGroup::make([]),

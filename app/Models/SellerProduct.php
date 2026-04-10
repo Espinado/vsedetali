@@ -14,7 +14,11 @@ class SellerProduct extends Model
         'seller_id',
         'product_id',
         'price',
+        'cost_price',
         'quantity',
+        'oem_code',
+        'article',
+        'shipping_days',
         'warehouse_id',
         'status',
     ];
@@ -23,7 +27,9 @@ class SellerProduct extends Model
     {
         return [
             'price' => 'decimal:2',
+            'cost_price' => 'decimal:2',
             'quantity' => 'integer',
+            'shipping_days' => 'integer',
         ];
     }
 

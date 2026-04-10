@@ -28,6 +28,11 @@ class WarehouseResource extends Resource
 
     protected static ?int $navigationSort = 10;
 
+    public static function shouldRegisterNavigation(): bool
+    {
+        return false;
+    }
+
     public static function getEloquentQuery(): Builder
     {
         return parent::getEloquentQuery()->with('seller');
@@ -147,9 +152,7 @@ class WarehouseResource extends Resource
 
     public static function getRelations(): array
     {
-        return [
-            WarehouseResource\RelationManagers\MarketplaceSellerProductsRelationManager::class,
-        ];
+        return [];
     }
 
     public static function getPages(): array

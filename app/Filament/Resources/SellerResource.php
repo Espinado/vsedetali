@@ -3,6 +3,8 @@
 namespace App\Filament\Resources;
 
 use App\Filament\Resources\SellerResource\Pages;
+use App\Filament\Resources\SellerResource\RelationManagers\MarketplaceSellerProductsRelationManager;
+use App\Filament\Resources\SellerResource\RelationManagers\WarehousesRelationManager;
 use App\Models\Seller;
 use App\Models\Staff;
 use Filament\Forms;
@@ -109,7 +111,7 @@ class SellerResource extends Resource
                             ->nullable(),
                     ]),
                 Forms\Components\Section::make('Администратор продавца (первый вход по приглашению)')
-                    ->description('На email уйдёт ссылка для установки пароля. Вход в кабинет: '.url('/seller').'. После создания автоматически создаётся склад продавца «Основной склад». Склад по умолчанию для всей площадки задаётся только у складов без продавца (раздел Склады).')
+                    ->description('На email уйдёт ссылка для установки пароля. Вход в кабинет: '.url('/seller').'. После создания автоматически создаётся склад продавца «Основной склад». Дополнительные склады и товары на площадке — во вкладках карточки продавца (после сохранения).')
                     ->visibleOn('create')
                     ->schema([
                         Forms\Components\TextInput::make('admin_first_name')
@@ -172,6 +174,14 @@ class SellerResource extends Resource
     public static function getEloquentQuery(): Builder
     {
         return parent::getEloquentQuery()->withCount('sellerStaff');
+    }
+
+    public static function getRelations(): array
+    {
+        return [
+            WarehousesRelationManager::class,
+            MarketplaceSellerProductsRelationManager::class,
+        ];
     }
 
     public static function getPages(): array

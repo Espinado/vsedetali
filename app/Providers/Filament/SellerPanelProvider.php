@@ -3,6 +3,7 @@
 namespace App\Providers\Filament;
 
 use App\Filament\Seller\Pages\Dashboard;
+use App\Filament\Seller\Widgets\SellerOrdersSummaryWidget;
 use Filament\Http\Middleware\Authenticate;
 use Filament\Http\Middleware\DisableBladeIconComponents;
 use Filament\Http\Middleware\DispatchServingFilamentEvent;
@@ -37,6 +38,7 @@ class SellerPanelProvider extends PanelProvider
                 Dashboard::class,
             ])
             ->widgets([
+                SellerOrdersSummaryWidget::class,
                 Widgets\AccountWidget::class,
             ])
             ->middleware([
