@@ -42,6 +42,14 @@ class Warehouse extends Model
         return $this->hasMany(Stock::class);
     }
 
+    /**
+     * Все карточки товаров продавца этого склада (по общему seller_id).
+     */
+    public function marketplaceSellerProducts(): HasMany
+    {
+        return $this->hasMany(SellerProduct::class, 'seller_id', 'seller_id');
+    }
+
     public function scopeActive($query)
     {
         return $query->where('is_active', true);

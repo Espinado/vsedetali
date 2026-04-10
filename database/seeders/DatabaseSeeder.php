@@ -19,7 +19,9 @@ class DatabaseSeeder extends Seeder
             PageSeeder::class,
             BannerSeeder::class,
             RolePermissionSeeder::class,
+            SellerStaffRoleSeeder::class,
             DemoCustomersSeeder::class,
+            TestSellerSeeder::class,
         ]);
     }
 }

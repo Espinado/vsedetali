@@ -100,4 +100,55 @@ class CustomerBlockingService
             throw new \RuntimeException('Оформление заказа с этого устройства недоступно. Обратитесь в магазин.');
         }
     }
+
+    /**
+     * Синхронизация таблицы customer_blocks с блокировкой покупателя (Покупатели в админке).
+     * При блокировке: email + последний известный IP входа (если есть).
+     * При снятии блокировки: удаляются соответствующие записи email/ip.
+     */
+    public function syncBlacklistForCustomerUser(User $user): void
+    {
+        if ($user->isBlocked()) {
+            $email = $this->normalizeEmail($user->email);
+
+            if ($user->wasChanged('email') && $user->getOriginal('email')) {
+                $oldEmail = $this->normalizeEmail((string) $user->getOriginal('email'));
+                if ($oldEmail !== '' && $oldEmail !== $email) {
+                    CustomerBlock::query()
+                        ->where('type', CustomerBlock::TYPE_EMAIL)
+                        ->where('value', $oldEmail)
+                        ->delete();
+                }
+            }
+
+            CustomerBlock::query()->updateOrCreate(
+                ['type' => CustomerBlock::TYPE_EMAIL, 'value' => $email],
+                ['reason' => $user->block_reason]
+            );
+
+            $ip = $user->last_login_ip ? $this->normalizeIp($user->last_login_ip) : null;
+            if ($ip !== null && $ip !== '') {
+                CustomerBlock::query()->updateOrCreate(
+                    ['type' => CustomerBlock::TYPE_IP, 'value' => $ip],
+                    ['reason' => $user->block_reason]
+                );
+            }
+
+            return;
+        }
+
+        $email = $this->normalizeEmail($user->email);
+        CustomerBlock::query()
+            ->where('type', CustomerBlock::TYPE_EMAIL)
+            ->where('value', $email)
+            ->delete();
+
+        $ip = $user->last_login_ip ? $this->normalizeIp($user->last_login_ip) : null;
+        if ($ip !== null && $ip !== '') {
+            CustomerBlock::query()
+                ->where('type', CustomerBlock::TYPE_IP)
+                ->where('value', $ip)
+                ->delete();
+        }
+    }
 }

@@ -31,6 +31,9 @@ class CustomerBlockResource extends Resource
 
     protected static ?int $navigationSort = 2;
 
+    /** Отдельный пункт меню не нужен: блокировка из «Покупатели» синхронизирует customer_blocks. */
+    protected static bool $shouldRegisterNavigation = false;
+
     public static function canViewAny(): bool
     {
         return static::allow(StaffPermission::CUSTOMERS_VIEW);

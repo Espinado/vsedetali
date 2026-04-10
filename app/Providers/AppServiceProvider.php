@@ -5,6 +5,8 @@ namespace App\Providers;
 use App\Broadcasting\GuestAwarePusherBroadcaster;
 use App\Models\Setting;
 use App\Models\Staff;
+use App\Models\User;
+use App\Observers\UserObserver;
 use Illuminate\Broadcasting\BroadcastManager;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\Schema;
@@ -54,6 +56,8 @@ class AppServiceProvider extends ServiceProvider
      */
     public function boot(): void
     {
+        User::observe(UserObserver::class);
+
         Gate::before(function ($user, string $ability) {
             if ($user instanceof Staff && $user->hasRole('admin')) {
                 return true;

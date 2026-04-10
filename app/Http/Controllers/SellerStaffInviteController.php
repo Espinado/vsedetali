@@ -2,32 +2,32 @@
 
 namespace App\Http\Controllers;
 
-use App\Models\Staff;
-use App\Services\StaffInvitationService;
+use App\Models\SellerStaff;
+use App\Services\SellerStaffInvitationService;
 use Filament\Facades\Filament;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Validation\Rules\Password;
 use Illuminate\View\View;
 
-class StaffInviteController extends Controller
+class SellerStaffInviteController extends Controller
 {
     public function __construct(
-        protected StaffInvitationService $invitationService
+        protected SellerStaffInvitationService $invitationService
     ) {}
 
     public function show(string $token): View|RedirectResponse
     {
-        if (auth('staff')->check()) {
-            return redirect()->to(Filament::getPanel('admin')->getUrl());
+        if (auth('seller_staff')->check()) {
+            return redirect()->to(Filament::getPanel('seller')->getUrl());
         }
 
         $staff = $this->invitationService->findValidStaffByToken($token);
-        if (! $staff instanceof Staff) {
+        if (! $staff instanceof SellerStaff) {
             abort(404);
         }
 
-        return view('staff.invite-password', [
+        return view('seller-staff.invite-password', [
             'staff' => $staff,
             'token' => $token,
         ]);
@@ -35,12 +35,12 @@ class StaffInviteController extends Controller
 
     public function update(Request $request, string $token): RedirectResponse
     {
-        if (auth('staff')->check()) {
-            return redirect('/admin');
+        if (auth('seller_staff')->check()) {
+            return redirect()->to(Filament::getPanel('seller')->getUrl());
         }
 
         $staff = $this->invitationService->findValidStaffByToken($token);
-        if (! $staff instanceof Staff) {
+        if (! $staff instanceof SellerStaff) {
             abort(404);
         }
 
@@ -50,8 +50,8 @@ class StaffInviteController extends Controller
 
         $this->invitationService->completePasswordSetup($staff, $validated['password']);
 
-        auth('staff')->login($staff);
+        auth('seller_staff')->login($staff);
 
-        return redirect('/admin');
+        return redirect()->to(Filament::getPanel('seller')->getUrl());
     }
 }

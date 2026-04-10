@@ -18,6 +18,7 @@ class Seller extends Model
         'user_id',
         'name',
         'slug',
+        'contract_date',
         'inn',
         'legal_info',
         'commission_percent',
@@ -27,6 +28,7 @@ class Seller extends Model
     protected function casts(): array
     {
         return [
+            'contract_date' => 'date',
             'commission_percent' => 'decimal:2',
         ];
     }
@@ -44,6 +46,11 @@ class Seller extends Model
     public function warehouses(): HasMany
     {
         return $this->hasMany(Warehouse::class);
+    }
+
+    public function sellerStaff(): HasMany
+    {
+        return $this->hasMany(SellerStaff::class);
     }
 
     public function scopeActive($query)

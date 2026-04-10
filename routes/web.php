@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\AuthController;
+use App\Http\Controllers\SellerStaffInviteController;
 use App\Http\Controllers\StaffInviteController;
 use App\Http\Controllers\ProductController;
 use App\Http\Controllers\SitemapController;
@@ -34,6 +35,8 @@ Route::post('/logout', [AuthController::class, 'logout'])->name('logout')->middl
 Route::middleware('throttle:12,1')->group(function () {
     Route::get('/staff/invite/{token}', [StaffInviteController::class, 'show'])->name('staff.invite.show');
     Route::post('/staff/invite/{token}', [StaffInviteController::class, 'update'])->name('staff.invite.update');
+    Route::get('/seller/invite/{token}', [SellerStaffInviteController::class, 'show'])->name('seller-staff.invite.show');
+    Route::post('/seller/invite/{token}', [SellerStaffInviteController::class, 'update'])->name('seller-staff.invite.update');
 });
 
 Route::get('/sitemap.xml', SitemapController::class)->name('sitemap');

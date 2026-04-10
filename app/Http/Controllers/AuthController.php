@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\User;
 use App\Services\CustomerBlockingService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
@@ -43,6 +44,10 @@ class AuthController extends Controller
                 'email' => __('auth.failed'),
             ])->onlyInput('email');
         }
+
+        /** @var User $authUser */
+        $authUser = Auth::user();
+        $authUser->forceFill(['last_login_ip' => $request->ip()])->saveQuietly();
 
         $request->session()->regenerate();
 
@@ -86,6 +91,7 @@ class AuthController extends Controller
             'name' => $validated['name'],
             'email' => $validated['email'],
             'password' => $validated['password'],
+            'last_login_ip' => $request->ip(),
         ]);
 
         Auth::login($user);

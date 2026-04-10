@@ -6,6 +6,8 @@ use App\Filament\Concerns\AuthorizesWarehouseResource;
 use App\Filament\Resources\WarehouseResource\Pages;
 use App\Models\Warehouse;
 use Filament\Forms;
+use Filament\Forms\Get;
+use Filament\Forms\Set;
 use Illuminate\Database\Eloquent\Builder;
 use Filament\Forms\Form;
 use Filament\Resources\Resource;
@@ -53,12 +55,19 @@ class WarehouseResource extends Resource
                             ->searchable()
                             ->preload()
                             ->nullable()
+                            ->live()
                             ->placeholder('— Площадка (наш основной склад)')
-                            ->helperText('Не выбирайте продавца — это ваш склад. Выберите продавца — склад хранения/отгрузки этого продавца на маркетплейсе.'),
+                            ->helperText('Не выбирайте продавца — это ваш склад. Выберите продавца — склад хранения/отгрузки этого продавца на маркетплейсе.')
+                            ->afterStateUpdated(function ($state, Set $set): void {
+                                if (filled($state)) {
+                                    $set('is_default', false);
+                                }
+                            }),
                         Forms\Components\Toggle::make('is_default')
-                            ->label('Склад по умолчанию')
-                            ->helperText('Обычно один «главный» склад площадки; для продавцов — по договорённости.')
-                            ->default(false),
+                            ->label('Склад по умолчанию для площадки')
+                            ->helperText('Только для склада без продавца. Импорты и подстановка склада без явного выбора используют этот склад. У продавца склад по умолчанию не задаётся.')
+                            ->default(false)
+                            ->visible(fn (Get $get): bool => blank($get('seller_id'))),
                         Forms\Components\Toggle::make('is_active')
                             ->label('Активен')
                             ->default(true),
@@ -87,10 +96,16 @@ class WarehouseResource extends Resource
                 Tables\Columns\TextColumn::make('stocks_count')
                     ->label('Остатков')
                     ->counts('stocks'),
-                Tables\Columns\IconColumn::make('is_default')
+                Tables\Columns\TextColumn::make('is_default')
                     ->label('По умолчанию')
-                    ->boolean()
-                    ->sortable(),
+                    ->formatStateUsing(function (mixed $state, Warehouse $record): string {
+                        if ($record->isSellerWarehouse()) {
+                            return '—';
+                        }
+
+                        return $record->is_default ? 'Да' : 'Нет';
+                    })
+                    ->sortable(query: fn (Builder $query, string $direction): Builder => $query->orderBy('is_default', $direction)),
                 Tables\Columns\IconColumn::make('is_active')
                     ->label('Активен')
                     ->boolean()
@@ -128,6 +143,13 @@ class WarehouseResource extends Resource
                     Tables\Actions\DeleteBulkAction::make(),
                 ]),
             ]);
+    }
+
+    public static function getRelations(): array
+    {
+        return [
+            WarehouseResource\RelationManagers\MarketplaceSellerProductsRelationManager::class,
+        ];
     }
 
     public static function getPages(): array

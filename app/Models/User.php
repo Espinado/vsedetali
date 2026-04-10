@@ -22,6 +22,7 @@ class User extends Authenticatable
         'phone',
         'blocked_at',
         'block_reason',
+        'last_login_ip',
     ];
 
     protected $hidden = [

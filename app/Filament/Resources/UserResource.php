@@ -67,11 +67,17 @@ class UserResource extends Resource
                 Forms\Components\TextInput::make('phone')
                     ->maxLength(50)
                     ->nullable(),
+                Forms\Components\TextInput::make('last_login_ip')
+                    ->label('Последний IP входа')
+                    ->disabled()
+                    ->dehydrated(false)
+                    ->visible(fn (?User $record): bool => $record !== null)
+                    ->helperText('Заполняется при входе. При блокировке этот IP тоже попадает в список блокировок (вместе с email).'),
                 Forms\Components\DateTimePicker::make('blocked_at')
                     ->label('Заблокирован с')
                     ->seconds(false)
                     ->nullable()
-                    ->helperText('Если указано — покупатель не сможет войти и оформить заказ. Очистите поле, чтобы снять блокировку.'),
+                    ->helperText('Блокировка: запись в списке покупателей + автоматически email и последний IP (если известен) для входа и оформления заказа. Очистите поле, чтобы снять блокировку.'),
                 Forms\Components\Textarea::make('block_reason')
                     ->label('Причина блокировки')
                     ->rows(2)
@@ -94,6 +100,10 @@ class UserResource extends Resource
                 Tables\Columns\TextColumn::make('name')->searchable()->sortable(),
                 Tables\Columns\TextColumn::make('email')->searchable()->sortable(),
                 Tables\Columns\TextColumn::make('phone')->searchable(),
+                Tables\Columns\TextColumn::make('last_login_ip')
+                    ->label('Посл. IP')
+                    ->toggleable(isToggledHiddenByDefault: true)
+                    ->placeholder('—'),
                 Tables\Columns\TextColumn::make('id')
                     ->label('Доступ')
                     ->formatStateUsing(fn ($state, \App\Models\User $record): string => $record->isBlocked() ? 'Заблокирован' : 'Активен')
