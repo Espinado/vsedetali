@@ -77,7 +77,8 @@
         </div>
     </footer>
 
-    @livewire('storefront.store-chat-widget')
+    {{-- Чат с админом временно отключён на витрине (компонент не удалён). --}}
+    {{-- @livewire('storefront.store-chat-widget') --}}
     @livewire('storefront.cart-drawer')
     @livewireScripts
 </body>
