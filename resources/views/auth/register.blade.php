@@ -19,7 +19,7 @@
         <div>
             <label for="name" class="block text-sm font-medium text-slate-700 mb-1">Имя</label>
             <input type="text" name="name" id="name" value="{{ old('name') }}" required autofocus autocomplete="name"
-                   class="w-full rounded border-slate-300 shadow-sm focus:border-orange-500 focus:ring-orange-500">
+                   class="input-storefront">
         </div>
         <div>
             <label for="email" class="block text-sm font-medium text-slate-700 mb-1">Email</label>
@@ -29,12 +29,12 @@
         <div>
             <label for="password" class="block text-sm font-medium text-slate-700 mb-1">Пароль</label>
             <input type="password" name="password" id="password" required autocomplete="new-password"
-                   class="w-full rounded border-slate-300 shadow-sm focus:border-orange-500 focus:ring-orange-500">
+                   class="input-storefront">
         </div>
         <div>
             <label for="password_confirmation" class="block text-sm font-medium text-slate-700 mb-1">Подтверждение пароля</label>
             <input type="password" name="password_confirmation" id="password_confirmation" required autocomplete="new-password"
-                   class="w-full rounded border-slate-300 shadow-sm focus:border-orange-500 focus:ring-orange-500">
+                   class="input-storefront">
         </div>
         <div class="pt-2">
             <button type="submit" class="min-h-11 w-full rounded bg-orange-600 px-4 py-2.5 font-medium text-white hover:bg-orange-700">Зарегистрироваться</button>

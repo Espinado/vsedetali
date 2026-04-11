@@ -28,19 +28,19 @@
                 <div>
                     <label for="customer_name" class="block text-sm font-medium text-slate-700 mb-1">Имя *</label>
                     <input type="text" id="customer_name" wire:model="customer_name"
-                           class="w-full rounded border-slate-300 shadow-sm focus:border-orange-500 focus:ring-orange-500">
+                           class="input-storefront">
                     @error('customer_name') <span class="text-red-600 text-sm">{{ $message }}</span> @enderror
                 </div>
                 <div>
                     <label for="customer_email" class="block text-sm font-medium text-slate-700 mb-1">Email *</label>
                     <input type="email" id="customer_email" wire:model="customer_email"
-                           class="w-full rounded border-slate-300 shadow-sm focus:border-orange-500 focus:ring-orange-500">
+                           class="input-storefront">
                     @error('customer_email') <span class="text-red-600 text-sm">{{ $message }}</span> @enderror
                 </div>
                 <div>
                     <label for="customer_phone" class="block text-sm font-medium text-slate-700 mb-1">Телефон</label>
                     <input type="text" id="customer_phone" wire:model="customer_phone"
-                           class="w-full rounded border-slate-300 shadow-sm focus:border-orange-500 focus:ring-orange-500">
+                           class="input-storefront">
                     @error('customer_phone') <span class="text-red-600 text-sm">{{ $message }}</span> @enderror
                 </div>
                 <div class="pt-2">
@@ -59,16 +59,16 @@
                     @if ($this->addresses->isNotEmpty())
                         <div class="space-y-2 mb-4">
                             @foreach ($this->addresses as $addr)
-                                <label class="flex items-start gap-3 p-3 border rounded cursor-pointer hover:bg-slate-50">
-                                    <input type="radio" wire:model="address_id" value="{{ $addr->id }}" class="mt-1">
+                                <label class="flex cursor-pointer items-start gap-3 rounded-lg border border-slate-300 p-3 hover:bg-slate-50 focus-within:ring-2 focus-within:ring-orange-500/40">
+                                    <input type="radio" wire:model="address_id" value="{{ $addr->id }}" class="mt-1 text-orange-600 focus:ring-2 focus:ring-orange-500/40">
                                     <span>
                                         <span class="font-medium">{{ $addr->name ?: 'Адрес' }}</span><br>
                                         <span class="text-slate-600 text-sm">{{ $addr->full_address }}, {{ $addr->city }}{{ $addr->postcode ? ', ' . $addr->postcode : '' }}</span>
                                     </span>
                                 </label>
                             @endforeach
-                            <label class="flex items-start gap-3 p-3 border rounded cursor-pointer hover:bg-slate-50">
-                                <input type="radio" wire:model="address_id" value="0" class="mt-1">
+                            <label class="flex cursor-pointer items-start gap-3 rounded-lg border border-slate-300 p-3 hover:bg-slate-50 focus-within:ring-2 focus-within:ring-orange-500/40">
+                                <input type="radio" wire:model="address_id" value="0" class="mt-1 text-orange-600 focus:ring-2 focus:ring-orange-500/40">
                                 <span>Новый адрес</span>
                             </label>
                         </div>
@@ -77,30 +77,30 @@
                         <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
                             <div class="sm:col-span-2">
                                 <label class="block text-sm font-medium text-slate-700 mb-1">Получатель *</label>
-                                <input type="text" wire:model="delivery_name" class="w-full rounded border-slate-300">
+                                <input type="text" wire:model="delivery_name" class="input-storefront">
                                 @error('delivery_name') <span class="text-red-600 text-sm">{{ $message }}</span> @enderror
                             </div>
                             <div class="sm:col-span-2">
                                 <label class="block text-sm font-medium text-slate-700 mb-1">Адрес *</label>
-                                <input type="text" wire:model="delivery_full_address" class="w-full rounded border-slate-300">
+                                <input type="text" wire:model="delivery_full_address" class="input-storefront">
                                 @error('delivery_full_address') <span class="text-red-600 text-sm">{{ $message }}</span> @enderror
                             </div>
                             <div>
                                 <label class="block text-sm font-medium text-slate-700 mb-1">Город *</label>
-                                <input type="text" wire:model="delivery_city" class="w-full rounded border-slate-300">
+                                <input type="text" wire:model="delivery_city" class="input-storefront">
                                 @error('delivery_city') <span class="text-red-600 text-sm">{{ $message }}</span> @enderror
                             </div>
                             <div>
                                 <label class="block text-sm font-medium text-slate-700 mb-1">Регион</label>
-                                <input type="text" wire:model="delivery_region" class="w-full rounded border-slate-300">
+                                <input type="text" wire:model="delivery_region" class="input-storefront">
                             </div>
                             <div>
                                 <label class="block text-sm font-medium text-slate-700 mb-1">Индекс</label>
-                                <input type="text" wire:model="delivery_postcode" class="w-full rounded border-slate-300">
+                                <input type="text" wire:model="delivery_postcode" class="input-storefront">
                             </div>
                             <div>
                                 <label class="block text-sm font-medium text-slate-700 mb-1">Телефон</label>
-                                <input type="text" wire:model="delivery_phone" class="w-full rounded border-slate-300">
+                                <input type="text" wire:model="delivery_phone" class="input-storefront">
                             </div>
                         </div>
                     @else
@@ -157,7 +157,7 @@
                 </div>
                 <div class="rounded-lg border border-slate-200 bg-white p-4 sm:p-6">
                     <label class="block text-sm font-medium text-slate-700 mb-2">Комментарий к заказу</label>
-                    <textarea wire:model="comment" rows="2" class="w-full rounded border-slate-300" placeholder="Необязательно"></textarea>
+                    <textarea wire:model="comment" rows="2" class="input-storefront" placeholder="Необязательно"></textarea>
                 </div>
                 <div class="flex flex-col-reverse gap-3 sm:flex-row">
                     <button type="button" wire:click="stepBack" class="min-h-11 w-full rounded border border-slate-300 px-4 py-2.5 hover:bg-slate-50 sm:w-auto">← Назад</button>

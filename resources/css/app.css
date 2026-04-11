@@ -69,4 +69,19 @@
     .add-to-cart-store__badge {
         @apply border border-orange-200/90 bg-white shadow-sm ring-1 ring-orange-100/80 hover:border-orange-300 hover:bg-orange-50/90 hover:shadow-md hover:ring-orange-200/60 active:scale-[0.99];
     }
+
+    /* ЛК, вход, оформление заказа: видимая рамка и явный фокус */
+    .input-storefront {
+        @apply w-full min-h-10 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm transition-colors;
+        @apply focus:border-orange-500 focus:outline-none focus:ring-2 focus:ring-orange-500/40;
+    }
+
+    textarea.input-storefront {
+        @apply min-h-20 py-2;
+    }
+
+    .input-storefront-checkbox {
+        @apply h-4 w-4 shrink-0 rounded border border-slate-400 text-orange-600;
+        @apply focus:outline-none focus:ring-2 focus:ring-orange-500/40 focus:ring-offset-0;
+    }
 }

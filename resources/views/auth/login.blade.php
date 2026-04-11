@@ -19,15 +19,15 @@
         <div>
             <label for="email" class="block text-sm font-medium text-slate-700 mb-1">Email</label>
             <input type="email" name="email" id="email" value="{{ old('email') }}" required autofocus autocomplete="email"
-                   class="w-full rounded border-slate-300 shadow-sm focus:border-orange-500 focus:ring-orange-500">
+                   class="input-storefront">
         </div>
         <div>
             <label for="password" class="block text-sm font-medium text-slate-700 mb-1">Пароль</label>
             <input type="password" name="password" id="password" required autocomplete="current-password"
-                   class="w-full rounded border-slate-300 shadow-sm focus:border-orange-500 focus:ring-orange-500">
+                   class="input-storefront">
         </div>
         <div class="flex items-center">
-            <input type="checkbox" name="remember" id="remember" class="rounded border-slate-300 text-orange-600 focus:ring-orange-500">
+            <input type="checkbox" name="remember" id="remember" class="input-storefront-checkbox">
             <label for="remember" class="ml-2 text-sm text-slate-600">Запомнить меня</label>
         </div>
         <div class="pt-2">

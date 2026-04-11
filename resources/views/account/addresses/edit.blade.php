@@ -19,37 +19,37 @@
         @method('PUT')
         <div>
             <label for="name" class="block text-sm font-medium text-slate-700 mb-1">Получатель / Название</label>
-            <input type="text" name="name" id="name" value="{{ old('name', $address->name) }}" required class="w-full rounded border-slate-300">
+            <input type="text" name="name" id="name" value="{{ old('name', $address->name) }}" required class="input-storefront">
         </div>
         <div>
             <label for="full_address" class="block text-sm font-medium text-slate-700 mb-1">Адрес *</label>
-            <input type="text" name="full_address" id="full_address" value="{{ old('full_address', $address->full_address) }}" required class="w-full rounded border-slate-300">
+            <input type="text" name="full_address" id="full_address" value="{{ old('full_address', $address->full_address) }}" required class="input-storefront">
         </div>
         <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <div>
                 <label for="city" class="block text-sm font-medium text-slate-700 mb-1">Город *</label>
-                <input type="text" name="city" id="city" value="{{ old('city', $address->city) }}" required class="w-full rounded border-slate-300">
+                <input type="text" name="city" id="city" value="{{ old('city', $address->city) }}" required class="input-storefront">
             </div>
             <div>
                 <label for="postcode" class="block text-sm font-medium text-slate-700 mb-1">Индекс</label>
-                <input type="text" name="postcode" id="postcode" value="{{ old('postcode', $address->postcode) }}" class="w-full rounded border-slate-300">
+                <input type="text" name="postcode" id="postcode" value="{{ old('postcode', $address->postcode) }}" class="input-storefront">
             </div>
         </div>
         <div>
             <label for="region" class="block text-sm font-medium text-slate-700 mb-1">Регион</label>
-            <input type="text" name="region" id="region" value="{{ old('region', $address->region) }}" class="w-full rounded border-slate-300">
+            <input type="text" name="region" id="region" value="{{ old('region', $address->region) }}" class="input-storefront">
         </div>
         <div>
             <label for="country" class="block text-sm font-medium text-slate-700 mb-1">Страна *</label>
-            <input type="text" name="country" id="country" value="{{ old('country', $address->country) }}" maxlength="2" required class="w-full rounded border-slate-300">
+            <input type="text" name="country" id="country" value="{{ old('country', $address->country) }}" maxlength="2" required class="input-storefront">
         </div>
         <div>
             <label for="phone" class="block text-sm font-medium text-slate-700 mb-1">Телефон</label>
-            <input type="text" name="phone" id="phone" value="{{ old('phone', $address->phone) }}" class="w-full rounded border-slate-300">
+            <input type="text" name="phone" id="phone" value="{{ old('phone', $address->phone) }}" class="input-storefront">
         </div>
         <div class="flex items-center">
             <input type="hidden" name="is_default" value="0">
-            <input type="checkbox" name="is_default" id="is_default" value="1" {{ old('is_default', $address->is_default) ? 'checked' : '' }} class="rounded border-slate-300">
+            <input type="checkbox" name="is_default" id="is_default" value="1" {{ old('is_default', $address->is_default) ? 'checked' : '' }} class="input-storefront-checkbox">
             <label for="is_default" class="ml-2 text-sm text-slate-600">Использовать по умолчанию при оформлении заказа</label>
         </div>
         <div class="flex flex-col gap-2 pt-2 sm:flex-row">
