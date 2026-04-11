@@ -40,6 +40,10 @@ class AuthController extends Controller
             ])->onlyInput('email');
         }
 
+        // До Auth::attempt: после успешного входа Laravel может сменить id сессии (migrate),
+        // тогда гостевая корзина в БД останется на старом session_id — слияние нужно по старому id.
+        $guestSessionId = $request->session()->getId();
+
         if (! Auth::attempt($validated, $remember)) {
             return back()->withErrors([
                 'email' => __('auth.failed'),
@@ -50,7 +54,7 @@ class AuthController extends Controller
         $authUser = Auth::user();
         $authUser->forceFill(['last_login_ip' => $request->ip()])->saveQuietly();
 
-        app(CartService::class)->mergeGuestCartIntoUserCart($authUser, $request->session()->getId());
+        app(CartService::class)->mergeGuestCartIntoUserCart($authUser, $guestSessionId);
         $request->session()->regenerate();
 
         return redirect()->intended(route('account.dashboard'));
@@ -89,6 +93,8 @@ class AuthController extends Controller
             ])->onlyInput('email');
         }
 
+        $guestSessionId = $request->session()->getId();
+
         $user = User::create([
             'name' => $validated['name'],
             'email' => $validated['email'],
@@ -97,7 +103,7 @@ class AuthController extends Controller
         ]);
 
         Auth::login($user);
-        app(CartService::class)->mergeGuestCartIntoUserCart($user, $request->session()->getId());
+        app(CartService::class)->mergeGuestCartIntoUserCart($user, $guestSessionId);
         $request->session()->regenerate();
 
         return redirect()->route('account.dashboard');

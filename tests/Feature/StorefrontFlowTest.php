@@ -2,7 +2,9 @@
 
 namespace Tests\Feature;
 
+use App\Livewire\Storefront\AddToCartButton;
 use App\Livewire\Storefront\CheckoutWizard;
+use App\Models\Cart;
 use App\Models\Category;
 use App\Models\Order;
 use App\Models\OrderStatus;
@@ -10,6 +12,7 @@ use App\Models\Product;
 use App\Models\User;
 use App\Services\CartService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Hash;
 use Livewire\Livewire;
 use Tests\TestCase;
 
@@ -27,6 +30,37 @@ class StorefrontFlowTest extends TestCase
     {
         $this->get(route('checkout'))
             ->assertRedirect(route('login'));
+    }
+
+    public function test_guest_cart_merges_into_user_cart_on_login(): void
+    {
+        $product = $this->createActiveProduct();
+        $user = User::factory()->create([
+            'email' => 'buyer@example.test',
+            'password' => Hash::make('secret'),
+        ]);
+
+        Livewire::test(AddToCartButton::class, ['product' => $product])
+            ->set('quantity', 2)
+            ->call('addToCart')
+            ->assertHasNoErrors();
+
+        $this->assertDatabaseHas('cart_items', ['product_id' => $product->id, 'quantity' => 2]);
+
+        $this->post(route('login'), [
+            'email' => 'buyer@example.test',
+            'password' => 'secret',
+        ])->assertRedirect();
+
+        $this->assertAuthenticatedAs($user);
+
+        $mergedCart = Cart::query()
+            ->where('user_id', $user->id)
+            ->whereHas('cartItems')
+            ->first();
+
+        $this->assertNotNull($mergedCart);
+        $this->assertSame(2, (int) $mergedCart->cartItems()->sum('quantity'));
     }
 
     public function test_customer_can_open_home_product_cart_checkout_with_cart_item(): void
