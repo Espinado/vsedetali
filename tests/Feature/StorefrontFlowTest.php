@@ -29,7 +29,7 @@ class StorefrontFlowTest extends TestCase
             ->assertRedirect(route('login'));
     }
 
-    public function test_customer_can_open_catalog_product_cart_checkout_with_cart_item(): void
+    public function test_customer_can_open_home_product_cart_checkout_with_cart_item(): void
     {
         $product = $this->createActiveProduct();
         $user = User::factory()->create();
@@ -37,7 +37,9 @@ class StorefrontFlowTest extends TestCase
         $this->actingAs($user);
         app(CartService::class)->addItem($product, 2);
 
-        $this->get(route('catalog', ['categorySlug' => $product->category->slug]))->assertOk();
+        $this->get(route('catalog', ['categorySlug' => $product->category->slug]))
+            ->assertRedirect(route('home'));
+        $this->get(route('home'))->assertOk();
         $this->get(route('product.show', $product))->assertOk();
         $this->get(route('cart'))->assertOk();
         $this->get(route('checkout'))->assertOk();

@@ -8,7 +8,7 @@
 
     @if($orders->isEmpty())
         <p class="text-slate-600 py-8">У вас пока нет заказов.</p>
-        <a href="{{ route('catalog') }}" class="btn-store-cta-sm min-h-11 px-6">Перейти в каталог</a>
+        <a href="{{ route('home') }}" class="btn-store-cta-sm min-h-11 px-6">На главную</a>
     @else
         <ul class="divide-y divide-slate-200 bg-white rounded-lg border border-slate-200 overflow-hidden">
             @foreach($orders as $order)

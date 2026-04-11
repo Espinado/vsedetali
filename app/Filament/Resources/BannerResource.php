@@ -41,7 +41,7 @@ class BannerResource extends Resource
                     ->label('Изображение'),
                 Forms\Components\TextInput::make('link')
                     ->label('Ссылка')
-                    ->helperText('Необязательно. Если пусто — баннер без ссылки. Укажите https://… или путь /catalog')
+                    ->helperText('Необязательно. Если пусто — баннер без ссылки. Укажите https://… или путь / (главная)')
                     ->maxLength(500)
                     ->rules(['nullable', 'string', 'max:500']),
                 Forms\Components\TextInput::make('sort')

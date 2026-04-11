@@ -9,12 +9,16 @@ class HeaderSearch extends Component
 {
     public string $query = '';
 
+    /** `header` — тёмная шапка; `hero` — светлый блок на главной перед подбором. */
+    public string $variant = 'header';
+
     /** Показывать выпадающий список подсказок (скрывается после перехода по ссылке). */
     public bool $resultsPanelOpen = true;
 
-    public function mount(): void
+    public function mount(string $variant = 'header'): void
     {
-        $this->query = (string) request('search', '');
+        $this->variant = $variant;
+        $this->query = (string) request('search', request('q', ''));
     }
 
     public function updatedQuery(): void
@@ -62,12 +66,12 @@ class HeaderSearch extends Component
         $term = trim($this->query);
 
         if ($term === '') {
-            $this->redirect(route('catalog'), navigate: true);
+            $this->redirect(route('home'), navigate: true);
 
             return;
         }
 
-        $this->redirect(route('catalog', ['search' => $term]), navigate: true);
+        $this->redirect(route('home', ['search' => $term]), navigate: true);
     }
 
     public function clearSearch(): void

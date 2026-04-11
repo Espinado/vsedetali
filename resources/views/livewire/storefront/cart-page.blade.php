@@ -3,7 +3,7 @@
 
     @if($this->items->isEmpty())
         <p class="text-slate-600 py-12">В корзине пока ничего нет.</p>
-        <a href="{{ route('catalog') }}" class="btn-store-cta">Перейти в каталог</a>
+        <a href="{{ route('home') }}" class="btn-store-cta">На главную</a>
     @else
         <div class="overflow-hidden rounded-2xl border border-orange-100/90 bg-white shadow-sm shadow-orange-950/5">
             <ul class="divide-y divide-slate-200">

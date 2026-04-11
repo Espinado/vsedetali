@@ -12,7 +12,7 @@
 
     @if ($this->cart->cartItems->isEmpty())
         <div class="bg-amber-50 border border-amber-200 rounded-lg p-4 text-amber-800">
-            <p>Корзина пуста. <a href="{{ route('catalog') }}" class="underline font-medium">Перейти в каталог</a></p>
+            <p>Корзина пуста. <a href="{{ route('home') }}" class="underline font-medium">На главную</a></p>
         </div>
     @else
 

@@ -12,11 +12,11 @@
 
 @section('content')
     <nav class="mb-6 -mx-1 overflow-x-auto whitespace-nowrap px-1 text-sm text-slate-500 sm:whitespace-normal sm:overflow-visible" aria-label="Навигация">
-        <a href="{{ route('catalog') }}" class="font-medium text-slate-700 hover:text-slate-900">Каталог</a>
+        <a href="{{ route('home') }}" class="font-medium text-slate-700 hover:text-slate-900">Главная</a>
         @if($product->category)
             @foreach($product->category->ancestorsChainForStorefront() as $cat)
                 <span class="mx-1">/</span>
-                <a href="{{ route('catalog', ['categorySlug' => $cat->slug]) }}" class="hover:text-slate-700">{{ $cat->name }}</a>
+                <span class="text-slate-700">{{ $cat->name }}</span>
             @endforeach
         @endif
     </nav>
@@ -97,7 +97,7 @@
                                 <p class="text-slate-800 leading-relaxed text-[15px]">
                                     @foreach($vehiclesCompatLinks as $row)
                                         @unless($loop->first)<span class="text-slate-400">, </span>@endunless
-                                        <a href="{{ route('catalog', ['vehicleId' => $row['vehicle']->id]) }}"
+                                        <a href="{{ route('home', ['vehicleId' => $row['vehicle']->id]) }}"
                                            class="text-slate-900 underline decoration-slate-300 hover:decoration-slate-700 underline-offset-2">
                                             {{ $row['label'] }}
                                         </a>

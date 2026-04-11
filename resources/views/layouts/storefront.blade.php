@@ -12,18 +12,12 @@
 <body class="min-h-screen flex flex-col min-w-0 bg-gradient-to-b from-orange-50/90 via-amber-50/40 to-stone-100 text-stone-900">
     <header class="sticky top-0 z-50 border-b border-orange-950/30 bg-gradient-to-r from-stone-950 via-stone-900 to-stone-800 pt-[env(safe-area-inset-top)] shadow-md shadow-black/25">
         <div class="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8">
-            <div class="flex flex-col gap-3 py-3 md:flex-row md:items-center md:justify-between md:py-4">
-                <div class="flex items-center justify-between gap-3 min-w-0 md:w-auto">
+            <div class="flex flex-col gap-3 py-3 sm:flex-row sm:items-center sm:justify-between sm:py-4">
+                <div class="flex min-w-0 items-center gap-3">
                     <a href="{{ route('home') }}" class="truncate min-w-0 text-lg font-bold text-white transition hover:text-orange-200 sm:text-xl">{{ $storeName }}</a>
-                    <a href="{{ route('catalog') }}" class="shrink-0 inline-flex items-center min-h-10 px-2 text-sm text-stone-300 transition hover:text-orange-300 md:hidden">Каталог</a>
                 </div>
 
-                <div class="w-full min-w-0 flex-1 md:px-4 lg:px-6">
-                    @livewire('storefront.header-search')
-                </div>
-
-                <nav class="flex flex-wrap items-center gap-x-3 gap-y-2 justify-between sm:justify-end md:justify-end w-full md:w-auto">
-                    <a href="{{ route('catalog') }}" class="hidden md:inline-flex items-center min-h-10 text-sm text-stone-300 transition hover:text-orange-300">Каталог</a>
+                <nav class="flex w-full flex-wrap items-center justify-between gap-x-3 gap-y-2 sm:w-auto sm:justify-end">
                     @livewire('storefront.cart-icon')
                     @auth
                         @if(Route::has('account.dashboard'))

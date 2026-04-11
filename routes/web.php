@@ -5,7 +5,6 @@ use App\Http\Controllers\SellerStaffInviteController;
 use App\Http\Controllers\StaffInviteController;
 use App\Http\Controllers\ProductController;
 use App\Http\Controllers\SitemapController;
-use App\Livewire\Storefront\ProductGrid;
 use App\Models\Banner;
 use App\Models\Order;
 use App\Models\Page;
@@ -74,7 +73,10 @@ Route::get('/', function () {
         'canonicalUrl' => url('/'),
     ]);
 })->name('home');
-Route::get('/catalog/{categorySlug?}', ProductGrid::class)->name('catalog');
+
+Route::get('/catalog/{categorySlug?}', function () {
+    return redirect()->route('home', request()->query(), 301);
+})->name('catalog');
 Route::get('/product/{product:slug}', [ProductController::class, 'show'])->name('product.show');
 Route::get('/cart', \App\Livewire\Storefront\CartPage::class)->name('cart');
 Route::middleware(['auth', 'customer.not.blocked'])->group(function () {

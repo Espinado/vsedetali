@@ -37,8 +37,8 @@
             <a href="{{ route('account.orders.show', $order) }}" class="btn-store-cta px-5">
                 Перейти к заказу
             </a>
-            <a href="{{ route('catalog') }}" class="inline-flex justify-center px-5 py-3 border border-slate-300 rounded-lg hover:bg-slate-50 font-medium text-slate-700">
-                Вернуться в каталог
+            <a href="{{ route('home') }}" class="inline-flex justify-center px-5 py-3 border border-slate-300 rounded-lg hover:bg-slate-50 font-medium text-slate-700">
+                На главную
             </a>
         </div>
     </div>

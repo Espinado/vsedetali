@@ -1,17 +1,30 @@
-<div class="relative w-full max-w-full md:max-w-xl">
+@php $isHero = $this->variant === 'hero'; @endphp
+<div @class([
+    'relative w-full',
+    'max-w-5xl' => $isHero,
+    'max-w-full md:max-w-xl' => ! $isHero,
+])>
     <form wire:submit.prevent="search" class="relative">
         <input
             type="search"
             wire:model.live.debounce.300ms="query"
-            placeholder="Поиск по названию, SKU, OEM или аналогу"
-            class="w-full min-w-0 rounded-lg border border-stone-600 bg-stone-800/90 py-2.5 pr-20 pl-3 text-sm text-stone-100 shadow-inner shadow-black/20 placeholder:text-stone-400 focus:border-orange-500 focus:bg-stone-800 focus:ring-2 focus:ring-orange-500/40 sm:px-4"
+            placeholder="{{ $isHero ? 'Номер детали, OEM, артикул, название…' : 'Поиск по названию, SKU, OEM или аналогу' }}"
+            @class([
+                'w-full min-w-0 rounded-lg py-2.5 pr-20 pl-3 text-sm sm:px-4',
+                'border border-orange-200/90 bg-white text-stone-900 shadow-sm ring-1 ring-orange-100/80 placeholder:text-stone-400 focus:border-orange-500 focus:outline-none focus:ring-2 focus:ring-orange-500/30' => $isHero,
+                'border border-stone-600 bg-stone-800/90 text-stone-100 shadow-inner shadow-black/20 placeholder:text-stone-400 focus:border-orange-500 focus:bg-stone-800 focus:ring-2 focus:ring-orange-500/40' => ! $isHero,
+            ])
         >
 
         @if ($query !== '')
             <button
                 type="button"
                 wire:click="clearSearch"
-                class="absolute right-12 top-1/2 -translate-y-1/2 text-stone-400 transition hover:text-orange-200"
+                @class([
+                    'absolute right-12 top-1/2 -translate-y-1/2 transition',
+                    'text-stone-400 hover:text-orange-600' => $isHero,
+                    'text-stone-400 hover:text-orange-200' => ! $isHero,
+                ])
                 aria-label="Очистить поиск"
             >
                 ×
@@ -20,7 +33,11 @@
 
         <button
             type="submit"
-            class="absolute right-3 top-1/2 -translate-y-1/2 text-sm font-semibold text-orange-400 transition hover:text-orange-300"
+            @class([
+                'absolute right-3 top-1/2 -translate-y-1/2 text-sm font-semibold transition',
+                'text-orange-700 hover:text-orange-900' => $isHero,
+                'text-orange-400 hover:text-orange-300' => ! $isHero,
+            ])
         >
             Найти
         </button>
@@ -77,7 +94,7 @@
 
                 <div class="border-t border-orange-100 bg-orange-50/50 px-4 py-3">
                     <a
-                        href="{{ route('catalog', ['search' => trim($query)]) }}"
+                        href="{{ route('home', ['search' => trim($query)]) }}"
                         wire:click="closeResultsPanel"
                         class="text-sm font-semibold text-orange-700 transition hover:text-orange-800"
                     >
