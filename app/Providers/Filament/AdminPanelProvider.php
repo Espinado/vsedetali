@@ -110,6 +110,7 @@ class AdminPanelProvider extends PanelProvider
             ->renderHook(
                 'panels::styles.after',
                 fn (): string => view('filament.hooks.admin-sidebar-groups-styles')->render()
+                    .view('filament.hooks.panel-table-layout-fix')->render()
             )
             ->renderHook(
                 'panels::body.end',

@@ -59,6 +59,10 @@ class SellerPanelProvider extends PanelProvider
             ->renderHook(
                 PanelsRenderHook::SCRIPTS_AFTER,
                 fn (): string => view('filament.hooks.sweetalert-assets')->render()
+            )
+            ->renderHook(
+                'panels::styles.after',
+                fn (): string => view('filament.hooks.panel-table-layout-fix')->render()
             );
     }
 }
