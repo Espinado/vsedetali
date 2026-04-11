@@ -10,6 +10,17 @@ use Illuminate\Database\Eloquent\Model;
 
 final class FilamentSweetAlert
 {
+    public const SESSION_FLASH_SUCCESS = 'filament_sweetalert_success';
+
+    /** Flash a success SweetAlert on the next rendered panel page (e.g. after redirect to the list). */
+    public static function flashSuccess(string $title, ?string $html = null): void
+    {
+        session()->flash(self::SESSION_FLASH_SUCCESS, [
+            'title' => $title,
+            'html' => $html,
+        ]);
+    }
+
     /**
      * Safe inside HTML double-quoted attributes (e.g. Filament x-on:click="...").
      * JSON/Js::from double quotes would terminate the attribute early.

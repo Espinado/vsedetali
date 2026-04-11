@@ -37,3 +37,24 @@
 <script>
     {!! \App\Filament\Support\FilamentSweetAlert::mixinScript() !!}
 </script>
+@php
+    $swalSuccess = session()->pull(\App\Filament\Support\FilamentSweetAlert::SESSION_FLASH_SUCCESS);
+@endphp
+@if (is_array($swalSuccess) && filled($swalSuccess['title'] ?? null))
+<script>
+    (function () {
+        var payload = @json($swalSuccess);
+        if (typeof Swal === 'undefined') {
+            return;
+        }
+        Swal.fire({
+            icon: 'success',
+            title: payload.title,
+            html: payload.html || undefined,
+            showCancelButton: false,
+            confirmButtonText: 'OK',
+            confirmButtonColor: '#ea580c',
+        });
+    })();
+</script>
+@endif

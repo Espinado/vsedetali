@@ -3,6 +3,7 @@
 namespace App\Filament\Seller\Resources\SellerProductResource\Pages;
 
 use App\Filament\Seller\Resources\SellerProductResource;
+use App\Filament\Support\FilamentSweetAlert;
 use App\Models\SellerStaff;
 use App\Services\SellerSubmittedProductService;
 use App\Support\SellerListingVehicleCompatibilities;
@@ -17,6 +18,11 @@ class CreateSellerProduct extends CreateRecord
     protected static string $resource = SellerProductResource::class;
 
     protected static bool $canCreateAnother = false;
+
+    protected function afterCreate(): void
+    {
+        FilamentSweetAlert::flashSuccess('Позиция создана');
+    }
 
     protected function getRedirectUrl(): string
     {

@@ -33,6 +33,11 @@ class EditProduct extends EditRecord
         );
     }
 
+    protected function afterSave(): void
+    {
+        FilamentSweetAlert::flashSuccess('Изменения сохранены');
+    }
+
     protected function getHeaderActions(): array
     {
         return [

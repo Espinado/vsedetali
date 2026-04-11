@@ -3,6 +3,7 @@
 namespace App\Filament\Resources\ProductResource\Pages;
 
 use App\Filament\Resources\ProductResource;
+use App\Filament\Support\FilamentSweetAlert;
 use Filament\Resources\Pages\CreateRecord;
 
 class CreateProduct extends CreateRecord
@@ -10,6 +11,11 @@ class CreateProduct extends CreateRecord
     protected static string $resource = ProductResource::class;
 
     protected static bool $canCreateAnother = false;
+
+    protected function afterCreate(): void
+    {
+        FilamentSweetAlert::flashSuccess('Товар создан');
+    }
 
     protected function getRedirectUrl(): string
     {
