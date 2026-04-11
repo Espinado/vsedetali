@@ -9,10 +9,20 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 
 /**
  * Продавец на маркетплейсе. Свои точки отгрузки — {@see Warehouse} с {@see Warehouse::$seller_id}.
+ *
+ * Блокировка площадкой: {@see self::STATUS_SUSPENDED} — персонал не входит в кабинет, листинги на паузе, товары не на витрине.
  */
 class Seller extends Model
 {
     use HasFactory;
+
+    public const STATUS_PENDING = 'pending';
+
+    public const STATUS_ACTIVE = 'active';
+
+    public const STATUS_SUSPENDED = 'suspended';
+
+    public const STATUS_REJECTED = 'rejected';
 
     protected $fillable = [
         'user_id',
@@ -56,5 +66,11 @@ class Seller extends Model
     public function scopeActive($query)
     {
         return $query->where('status', 'active');
+    }
+
+    /** Заблокирован администрацией площадки (нет доступа в кабинет, товары скрыты). */
+    public function isBlocked(): bool
+    {
+        return $this->status === self::STATUS_SUSPENDED;
     }
 }

@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Models\User;
+use App\Services\CartService;
 use App\Services\CustomerBlockingService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
@@ -49,6 +50,7 @@ class AuthController extends Controller
         $authUser = Auth::user();
         $authUser->forceFill(['last_login_ip' => $request->ip()])->saveQuietly();
 
+        app(CartService::class)->mergeGuestCartIntoUserCart($authUser, $request->session()->getId());
         $request->session()->regenerate();
 
         return redirect()->intended(route('account.dashboard'));
@@ -95,7 +97,9 @@ class AuthController extends Controller
         ]);
 
         Auth::login($user);
+        app(CartService::class)->mergeGuestCartIntoUserCart($user, $request->session()->getId());
         $request->session()->regenerate();
+
         return redirect()->route('account.dashboard');
     }
 }

@@ -6,6 +6,7 @@ use App\Filament\Resources\ProductResource;
 use App\Filament\Resources\SellerResource;
 use App\Filament\Support\FilamentSweetAlert;
 use App\Models\SellerProduct;
+use Filament\Notifications\Notification;
 use Filament\Resources\RelationManagers\RelationManager;
 use Filament\Tables;
 use Filament\Tables\Table;
@@ -72,6 +73,15 @@ class MarketplaceSellerProductsRelationManager extends RelationManager
                         ->color('success')
                         ->visible(fn (SellerProduct $record): bool => $record->status === 'pending')
                         ->action(function (SellerProduct $record): void {
+                            if ($record->seller?->isBlocked()) {
+                                Notification::make()
+                                    ->title('Продавец заблокирован')
+                                    ->body('Сначала смените статус продавца на «Активен», затем одобряйте листинги.')
+                                    ->danger()
+                                    ->send();
+
+                                return;
+                            }
                             $record->update(['status' => 'active']);
                             $record->product?->update(['is_active' => true]);
                         }),

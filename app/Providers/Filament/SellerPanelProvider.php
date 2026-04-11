@@ -2,8 +2,10 @@
 
 namespace App\Providers\Filament;
 
+use App\Filament\Seller\Pages\Auth\Login as SellerPanelLogin;
 use App\Filament\Seller\Pages\Dashboard;
 use App\Filament\Seller\Widgets\SellerOrdersSummaryWidget;
+use App\Http\Middleware\RedirectIfSellerBlockedFromPanel;
 use Filament\Http\Middleware\Authenticate;
 use Filament\Http\Middleware\DisableBladeIconComponents;
 use Filament\Http\Middleware\DispatchServingFilamentEvent;
@@ -30,7 +32,7 @@ class SellerPanelProvider extends PanelProvider
             ->authGuard('seller_staff')
             ->authPasswordBroker('seller_staff')
             ->brandName(config('app.name').' — продавец')
-            ->login()
+            ->login(SellerPanelLogin::class)
             ->colors([
                 'primary' => Color::Orange,
             ])
@@ -55,6 +57,7 @@ class SellerPanelProvider extends PanelProvider
             ])
             ->authMiddleware([
                 Authenticate::class,
+                RedirectIfSellerBlockedFromPanel::class,
             ])
             ->renderHook(
                 PanelsRenderHook::SCRIPTS_AFTER,

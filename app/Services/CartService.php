@@ -5,10 +5,60 @@ namespace App\Services;
 use App\Models\Cart;
 use App\Models\CartItem;
 use App\Models\Product;
+use App\Models\User;
 use Illuminate\Support\Facades\Auth;
 
 class CartService
 {
+    /**
+     * Переносит корзину гостя (по session_id) в корзину пользователя.
+     * Вызывать до session()->regenerate() при входе/регистрации, иначе id сессии меняется и товары «теряются».
+     */
+    public function mergeGuestCartIntoUserCart(User $user, string $guestSessionId): void
+    {
+        if ($guestSessionId === '') {
+            return;
+        }
+
+        $guestCart = Cart::query()
+            ->where('session_id', $guestSessionId)
+            ->whereNull('user_id')
+            ->latest('id')
+            ->first();
+
+        if (! $guestCart || $guestCart->cartItems()->doesntExist()) {
+            return;
+        }
+
+        $guestCart->load('cartItems');
+
+        $userCart = Cart::query()->where('user_id', $user->id)->latest('id')->first();
+
+        if (! $userCart) {
+            $guestCart->update(['user_id' => $user->id, 'session_id' => null]);
+
+            return;
+        }
+
+        foreach ($guestCart->cartItems as $item) {
+            $existing = CartItem::query()
+                ->where('cart_id', $userCart->id)
+                ->where('product_id', $item->product_id)
+                ->when($item->seller_id !== null, fn ($q) => $q->where('seller_id', $item->seller_id))
+                ->when($item->seller_id === null, fn ($q) => $q->whereNull('seller_id'))
+                ->first();
+
+            if ($existing) {
+                $existing->update(['quantity' => $existing->quantity + $item->quantity]);
+                $item->delete();
+            } else {
+                $item->update(['cart_id' => $userCart->id]);
+            }
+        }
+
+        $guestCart->delete();
+    }
+
     public function getOrCreateCart(): Cart
     {
         if (Auth::check()) {

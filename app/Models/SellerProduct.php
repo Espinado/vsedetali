@@ -21,6 +21,7 @@ class SellerProduct extends Model
         'shipping_days',
         'warehouse_id',
         'status',
+        'blocked_restore_marketplace_status',
     ];
 
     protected function casts(): array

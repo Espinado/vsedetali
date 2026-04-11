@@ -1,35 +1,47 @@
 <?php
 
-namespace App\Filament\Resources;
+namespace App\Filament\Seller\Resources;
 
 use App\Authorization\StaffPermission;
-use App\Filament\Concerns\ChecksStaffPermissions;
-use App\Filament\Resources\OrderResource\Pages;
+use App\Filament\Resources\OrderResource as AdminOrderResource;
+use App\Filament\Seller\Resources\OrderResource\Pages;
 use App\Models\Order;
-use Filament\Forms;
-use Filament\Forms\Form;
+use App\Models\SellerStaff;
+use App\Models\Setting;
 use Filament\Infolists;
 use Filament\Infolists\Infolist;
 use Filament\Resources\Resource;
 use Filament\Tables;
 use Filament\Tables\Table;
+use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Eloquent\Model;
 
 class OrderResource extends Resource
 {
-    use ChecksStaffPermissions;
-
     protected static ?string $model = Order::class;
 
     protected static ?string $navigationIcon = 'heroicon-o-shopping-cart';
 
-    protected static ?string $navigationGroup = 'Продажи';
+    protected static ?string $navigationLabel = 'Заказы';
 
-    protected static ?int $navigationSort = 10;
+    protected static ?string $modelLabel = 'Заказ';
+
+    protected static ?string $pluralModelLabel = 'Заказы';
+
+    protected static ?int $navigationSort = 0;
+
+    protected static function staff(): ?SellerStaff
+    {
+        $u = auth('seller_staff')->user();
+
+        return $u instanceof SellerStaff ? $u : null;
+    }
 
     public static function canViewAny(): bool
     {
-        return static::allow(StaffPermission::ORDERS_VIEW)
-            || static::allow(StaffPermission::FINANCE_VIEW);
+        $s = static::staff();
+
+        return $s !== null && ($s->can(StaffPermission::ORDERS_VIEW) || $s->can(StaffPermission::ORDERS_EDIT));
     }
 
     public static function canCreate(): bool
@@ -37,68 +49,41 @@ class OrderResource extends Resource
         return false;
     }
 
-    public static function canEdit($record): bool
+    public static function canEdit(Model $record): bool
     {
         return false;
     }
 
-    public static function canDelete($record): bool
+    public static function canDelete(Model $record): bool
     {
         return false;
     }
 
-    public static function form(Form $form): Form
+    public static function getEloquentQuery(): Builder
     {
-        return $form
-            ->schema([
-                Forms\Components\Select::make('status_id')
-                    ->relationship('status', 'name')
-                    ->required()
-                    ->searchable(),
-            ]);
+        $q = parent::getEloquentQuery();
+        $s = static::staff();
+        if (! $s) {
+            return $q->whereRaw('1 = 0');
+        }
+
+        return $q
+            ->withSellerItems($s->seller_id)
+            ->with(['latestPayment', 'latestShipment.shippingMethod', 'paymentMethod', 'status', 'orderItems']);
     }
 
     public static function table(Table $table): Table
     {
-        return $table
-            ->columns([
-                Tables\Columns\TextColumn::make('id')->sortable(),
-                Tables\Columns\TextColumn::make('customer_name')->label('Клиент')->searchable(),
-                Tables\Columns\TextColumn::make('customer_email')->searchable(),
-                Tables\Columns\TextColumn::make('status.name')->label('Статус')->badge()->sortable(),
-                Tables\Columns\TextColumn::make('payment_status_label')
-                    ->label('Оплата')
-                    ->badge()
-                    ->color(fn (Order $record): string => match ($record->latestPayment?->status) {
-                        'paid' => 'success',
-                        'pending' => 'warning',
-                        'failed' => 'danger',
-                        default => 'gray',
-                    }),
-                Tables\Columns\TextColumn::make('shipment_status_label')
-                    ->label('Отгрузка')
-                    ->badge()
-                    ->color(fn (Order $record): string => match ($record->latestShipment?->status) {
-                        'pending' => 'warning',
-                        'packed' => 'info',
-                        'shipped' => 'primary',
-                        'delivered' => 'success',
-                        'cancelled' => 'danger',
-                        default => 'gray',
-                    }),
-                Tables\Columns\TextColumn::make('total')->money('RUB')->sortable(),
-                Tables\Columns\TextColumn::make('created_at')->dateTime()->sortable(),
-            ])
-            ->defaultSort('created_at', 'desc')
-            ->filters([])
+        return AdminOrderResource::table($table)
             ->actions([
                 Tables\Actions\ViewAction::make(),
-            ])
-            ->bulkActions([]);
+            ]);
     }
 
     public static function infolist(Infolist $infolist): Infolist
     {
+        $sellerId = static::staff()?->seller_id;
+
         return $infolist
             ->schema([
                 Infolists\Components\Section::make('Заказ')
@@ -115,33 +100,43 @@ class OrderResource extends Resource
                         Infolists\Components\TextEntry::make('customer_phone')->label('Телефон'),
                     ])
                     ->columns(3),
-                Infolists\Components\Section::make('Товары')
+                Infolists\Components\Section::make('Ваши позиции в заказе')
+                    ->description('Остальные позиции могут быть у других продавцов или площадки; статус заказа общий.')
                     ->schema([
                         Infolists\Components\RepeatableEntry::make('orderItems')
                             ->label('')
+                            ->state(fn (Order $record) => $record->orderItems->where('seller_id', $sellerId))
                             ->schema([
                                 Infolists\Components\TextEntry::make('product_name'),
                                 Infolists\Components\TextEntry::make('sku'),
                                 Infolists\Components\TextEntry::make('quantity'),
-                                Infolists\Components\TextEntry::make('price')->money('RUB'),
-                                Infolists\Components\TextEntry::make('total')->money('RUB'),
+                                Infolists\Components\TextEntry::make('price')
+                                    ->money(Setting::get('currency', 'RUB')),
+                                Infolists\Components\TextEntry::make('total')
+                                    ->money(Setting::get('currency', 'RUB')),
                             ])
                             ->columns(5),
                     ]),
                 Infolists\Components\Section::make('Суммы')
                     ->schema([
-                        Infolists\Components\TextEntry::make('subtotal')->label('Товары')->money('RUB'),
-                        Infolists\Components\TextEntry::make('shipping_cost')->label('Доставка')->money('RUB'),
-                        Infolists\Components\TextEntry::make('total')->label('Итого')->money('RUB')->weight('bold'),
+                        Infolists\Components\TextEntry::make('seller_lines_total')
+                            ->label('Сумма по вашим позициям')
+                            ->state(function (Order $record) use ($sellerId): string {
+                                $sum = $record->orderItems->where('seller_id', $sellerId)->sum('total');
+
+                                return number_format((float) $sum, 2, '.', ' ').' '.Setting::get('currency', 'RUB');
+                            }),
+                        Infolists\Components\TextEntry::make('subtotal')->label('Товары (весь заказ)')->money(Setting::get('currency', 'RUB')),
+                        Infolists\Components\TextEntry::make('shipping_cost')->label('Доставка')->money(Setting::get('currency', 'RUB')),
+                        Infolists\Components\TextEntry::make('total')->label('Итого по заказу')->money(Setting::get('currency', 'RUB'))->weight('bold'),
                     ])
-                    ->columns(3),
+                    ->columns(2),
                 Infolists\Components\Section::make('Доставка и оплата')
                     ->schema([
                         Infolists\Components\TextEntry::make('shippingMethod.name')->label('Способ доставки'),
                         Infolists\Components\TextEntry::make('paymentMethod.name')->label('Способ оплаты'),
                         Infolists\Components\TextEntry::make('payment_status_label')->label('Статус оплаты')->badge(),
                         Infolists\Components\TextEntry::make('latestPayment.paid_at')->label('Оплачено')->dateTime()->placeholder('—'),
-                        Infolists\Components\TextEntry::make('latestPayment.gateway_reference')->label('Референс')->placeholder('—'),
                     ])
                     ->columns(3),
                 Infolists\Components\Section::make('Отгрузка')
@@ -161,7 +156,8 @@ class OrderResource extends Resource
                                 if (! $addr) {
                                     return '—';
                                 }
-                                $lines = array_filter([$addr->name, $addr->full_address, $addr->city . ($addr->postcode ? ' ' . $addr->postcode : ''), $addr->phone]);
+                                $lines = array_filter([$addr->name, $addr->full_address, $addr->city.($addr->postcode ? ' '.$addr->postcode : ''), $addr->phone]);
+
                                 return implode("\n", $lines);
                             })
                             ->formatStateUsing(fn (?string $state): string => $state ? nl2br(e($state)) : '—')
@@ -173,14 +169,7 @@ class OrderResource extends Resource
 
     public static function getRelations(): array
     {
-        return [
-            OrderResource\RelationManagers\ShipmentsRelationManager::class,
-        ];
-    }
-
-    public static function getEloquentQuery(): \Illuminate\Database\Eloquent\Builder
-    {
-        return parent::getEloquentQuery()->with(['latestPayment', 'latestShipment.shippingMethod', 'paymentMethod', 'status']);
+        return [];
     }
 
     public static function getPages(): array

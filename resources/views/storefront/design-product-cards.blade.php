@@ -191,7 +191,9 @@
                 <h3 class="pt-4 text-lg font-medium text-stone-900">Выбранный товар (слот + корзина)</h3>
                 <div class="max-w-4xl">
                     <x-storefront-product-card :product="$demo" selected-vehicle-label="Audi A4 (B8) 2.0 TDI">
-                        @livewire('storefront.add-to-cart-button', ['product' => $demo], key('design-cart-'.$demo->id))
+                        <x-slot name="cart">
+                            @livewire('storefront.add-to-cart-button', ['product' => $demo], key('design-cart-'.$demo->id))
+                        </x-slot>
                     </x-storefront-product-card>
                 </div>
             </section>

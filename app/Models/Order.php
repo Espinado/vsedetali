@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -97,6 +98,30 @@ class Order extends Model
     public function shippingAddress(): ?OrderAddress
     {
         return $this->orderAddresses()->where('type', 'shipping')->first();
+    }
+
+    /** Заказы, где есть хотя бы одна позиция этого продавца (маркетплейс). */
+    public function scopeWithSellerItems(Builder $query, int $sellerId): Builder
+    {
+        return $query->whereHas('orderItems', fn (Builder $q) => $q->where('seller_id', $sellerId));
+    }
+
+    /** Только продажи площадки: нет позиций с привязкой к продавцу маркетплейса. */
+    public function scopePlatformSalesOnly(Builder $query): Builder
+    {
+        return $query->whereDoesntHave(
+            'orderItems',
+            fn (Builder $q) => $q->whereNotNull('seller_id'),
+        );
+    }
+
+    /** Есть хотя бы одна позиция маркетплейс-продавца. */
+    public function scopeWithMarketplaceSellerItems(Builder $query): Builder
+    {
+        return $query->whereHas(
+            'orderItems',
+            fn (Builder $q) => $q->whereNotNull('seller_id'),
+        );
     }
 
     public function getPaymentStatusLabelAttribute(): string

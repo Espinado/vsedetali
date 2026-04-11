@@ -164,11 +164,12 @@
                             <th class="px-4 py-3">Производитель аналога</th>
                             <th class="px-4 py-3">Номер аналога</th>
                             <th class="px-4 py-3">Товар</th>
+                            <th class="px-4 py-3 min-w-[12rem]">Корзина</th>
                         </tr>
                     </thead>
                     <tbody class="divide-y divide-slate-100">
                         @foreach($crossAnalogItems as $item)
-                            <tr class="hover:bg-slate-50/80">
+                            <tr class="hover:bg-slate-50/80 align-top">
                                 <td class="px-4 py-3 text-slate-800">{{ $item->cross->manufacturer_name ?: '—' }}</td>
                                 <td class="px-4 py-3 font-mono text-slate-900">{{ $item->cross->cross_number }}</td>
                                 <td class="px-4 py-3">
@@ -179,6 +180,9 @@
                                         <span class="text-slate-500 text-sm"> — {{ $item->linked->brand->name }}</span>
                                     @endif
                                     <span class="block text-xs text-slate-400 font-mono mt-0.5">{{ $item->linked->sku }}</span>
+                                </td>
+                                <td class="px-4 py-3">
+                                    @livewire('storefront.add-to-cart-button', ['product' => $item->linked, 'compact' => true], key('product-show-analog-'.$item->linked->id))
                                 </td>
                             </tr>
                         @endforeach

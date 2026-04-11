@@ -3,9 +3,11 @@
 namespace App\Providers;
 
 use App\Broadcasting\GuestAwarePusherBroadcaster;
+use App\Models\Seller;
 use App\Models\Setting;
 use App\Models\Staff;
 use App\Models\User;
+use App\Observers\SellerObserver;
 use App\Observers\UserObserver;
 use Illuminate\Broadcasting\BroadcastManager;
 use Illuminate\Support\Facades\Gate;
@@ -65,6 +67,7 @@ class AppServiceProvider extends ServiceProvider
     public function boot(): void
     {
         User::observe(UserObserver::class);
+        Seller::observe(SellerObserver::class);
 
         Gate::before(function ($user, string $ability) {
             if ($user instanceof Staff && $user->hasRole('admin')) {

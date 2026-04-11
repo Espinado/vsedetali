@@ -10,6 +10,11 @@ class ListSellers extends ListRecords
 {
     protected static string $resource = SellerResource::class;
 
+    public function getSubNavigation(): array
+    {
+        return SellerResource::getSellerHubSubNavigation();
+    }
+
     protected function getHeaderActions(): array
     {
         return [

@@ -98,8 +98,10 @@
                         :hide-cross-preview="true"
                         class="min-h-0 flex-1 ring-2 ring-orange-400/50"
                     >
-                        @livewire('storefront.add-to-cart-button', ['product' => $main], key('hf-cart-'.$main->id))
-                        <p class="mt-3 text-center sm:text-left">
+                        <x-slot name="cart">
+                            @livewire('storefront.add-to-cart-button', ['product' => $main], key('hf-cart-'.$main->id))
+                        </x-slot>
+                        <p class="text-center sm:text-left">
                             <a href="{{ route('product.show', $main) }}" class="text-xs font-semibold text-orange-800 underline decoration-orange-200 underline-offset-2 hover:decoration-orange-500">
                                 Полная карточка товара →
                             </a>
@@ -116,7 +118,16 @@
                             :product="$row->linked"
                             :selectedVehicleLabel="$this->selectedVehicleLabel"
                             :cross-caption="'По кроссу: '.$row->cross->storefrontAnalogLabel()"
-                        />
+                        >
+                            <x-slot name="cart">
+                                @livewire('storefront.add-to-cart-button', ['product' => $row->linked], key('hf-cart-analog-'.$row->linked->id.'-'.$loop->index))
+                            </x-slot>
+                            <p class="text-center sm:text-left">
+                                <a href="{{ route('product.show', $row->linked) }}" class="text-xs font-semibold text-orange-800 underline decoration-orange-200 underline-offset-2 hover:decoration-orange-500">
+                                    Полная карточка товара →
+                                </a>
+                            </p>
+                        </x-storefront-product-card>
                     </div>
                 @endforeach
             </div>

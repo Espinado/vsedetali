@@ -9,6 +9,8 @@ use App\Models\Seller;
 use App\Models\Staff;
 use Filament\Forms;
 use Filament\Forms\Form;
+use Filament\Navigation\NavigationItem;
+use Filament\Pages\SubNavigationPosition;
 use Filament\Resources\Resource;
 use Filament\Tables;
 use Filament\Tables\Table;
@@ -17,6 +19,8 @@ use Illuminate\Database\Eloquent\Builder;
 class SellerResource extends Resource
 {
     protected static ?string $model = Seller::class;
+
+    protected static SubNavigationPosition $subNavigationPosition = SubNavigationPosition::Top;
 
     protected static ?string $navigationIcon = 'heroicon-o-building-storefront';
 
@@ -95,9 +99,10 @@ class SellerResource extends Resource
                             ->options([
                                 'pending' => 'Ожидает',
                                 'active' => 'Активен',
-                                'suspended' => 'Приостановлен',
+                                'suspended' => 'Заблокирован (нет входа в кабинет, товары скрыты с витрины)',
                                 'rejected' => 'Отклонён',
                             ])
+                            ->helperText('«Заблокирован» — доступ персонала закрыт, активные листинги ставятся на паузу, карточки товаров неактивны; при возврате в «Активен» восстанавливаются.')
                             ->default('active')
                             ->required()
                             ->visibleOn('edit'),
@@ -155,9 +160,16 @@ class SellerResource extends Resource
                     ->formatStateUsing(fn (string $state): string => match ($state) {
                         'pending' => 'Ожидает',
                         'active' => 'Активен',
-                        'suspended' => 'Приостановлен',
+                        'suspended' => 'Заблокирован',
                         'rejected' => 'Отклонён',
                         default => $state,
+                    })
+                    ->color(fn (string $state): string => match ($state) {
+                        'active' => 'success',
+                        'pending' => 'warning',
+                        'suspended' => 'danger',
+                        'rejected' => 'gray',
+                        default => 'gray',
                     }),
             ])
             ->defaultSort('name')
@@ -184,10 +196,32 @@ class SellerResource extends Resource
         ];
     }
 
+    /**
+     * Вкладки раздела «Продавцы»: список продавцов и заказы маркетплейса.
+     *
+     * @return array<NavigationItem>
+     */
+    public static function getSellerHubSubNavigation(): array
+    {
+        return [
+            NavigationItem::make('Продавцы')
+                ->icon('heroicon-o-building-storefront')
+                ->url(static::getUrl('index'))
+                ->isActiveWhen(fn (): bool => request()->routeIs(Pages\ListSellers::getRouteName()))
+                ->sort(0),
+            NavigationItem::make('Заказы продавцов')
+                ->icon('heroicon-o-shopping-cart')
+                ->url(static::getUrl('marketplace-orders'))
+                ->isActiveWhen(fn (): bool => request()->routeIs(Pages\ListMarketplaceOrders::getRouteName()))
+                ->sort(1),
+        ];
+    }
+
     public static function getPages(): array
     {
         return [
             'index' => Pages\ListSellers::route('/'),
+            'marketplace-orders' => Pages\ListMarketplaceOrders::route('/marketplace-orders'),
             'create' => Pages\CreateSeller::route('/create'),
             'edit' => Pages\EditSeller::route('/{record}/edit'),
         ];

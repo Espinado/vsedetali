@@ -12,9 +12,13 @@ class AddToCartButton extends Component
 
     public int $quantity = 1;
 
-    public function mount(Product $product): void
+    /** Узкий вариант для ячеек таблицы и плотных блоков */
+    public bool $compact = false;
+
+    public function mount(Product $product, bool $compact = false): void
     {
         $this->product = $product;
+        $this->compact = $compact;
     }
 
     public function addToCart(): void

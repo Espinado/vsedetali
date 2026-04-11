@@ -19,6 +19,11 @@ class CreateSeller extends CreateRecord
 
     protected static bool $canCreateAnother = false;
 
+    public function getSubNavigation(): array
+    {
+        return SellerResource::getSellerHubSubNavigation();
+    }
+
     protected string $adminFirstName = '';
 
     protected string $adminLastName = '';

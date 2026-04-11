@@ -49,8 +49,16 @@ class SellerStaff extends Authenticatable implements FilamentUser
 
     public function canAccessPanel(Panel $panel): bool
     {
-        return $panel->getId() === 'seller'
-            && $this->hasAnyRole(['admin', 'manager', 'accountant', 'warehouse']);
+        if ($panel->getId() !== 'seller') {
+            return false;
+        }
+
+        $seller = $this->seller;
+        if ($seller === null || $seller->isBlocked()) {
+            return false;
+        }
+
+        return $this->hasAnyRole(['admin', 'manager', 'accountant', 'warehouse']);
     }
 
     public function getFilamentName(): string

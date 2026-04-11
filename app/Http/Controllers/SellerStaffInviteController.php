@@ -52,6 +52,15 @@ class SellerStaffInviteController extends Controller
 
         auth('seller_staff')->login($staff);
 
+        $seller = $staff->seller;
+        if ($seller === null || $seller->isBlocked()) {
+            auth('seller_staff')->logout();
+
+            return redirect()
+                ->route('filament.seller.auth.login')
+                ->with('filament_seller_blocked_flash', true);
+        }
+
         return redirect()->to(Filament::getPanel('seller')->getUrl());
     }
 }

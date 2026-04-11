@@ -64,4 +64,9 @@
     .storefront-card-media img {
         @apply absolute inset-0 h-full w-full object-cover object-center;
     }
+
+    /* Блок «в корзину»: бейдж с иконкой корзины */
+    .add-to-cart-store__badge {
+        @apply border border-orange-200/90 bg-white shadow-sm ring-1 ring-orange-100/80 hover:border-orange-300 hover:bg-orange-50/90 hover:shadow-md hover:ring-orange-200/60 active:scale-[0.99];
+    }
 }

@@ -106,19 +106,8 @@ class ShipmentsRelationManager extends RelationManager
                     ->sortable(),
             ])
             ->defaultSort('created_at', 'desc')
-            ->headerActions([
-                Tables\Actions\CreateAction::make()
-                    ->after(fn (Shipment $record) => $this->syncOrderStatus($record)),
-            ])
-            ->actions([
-                Tables\Actions\EditAction::make()
-                    ->after(fn (Shipment $record) => $this->syncOrderStatus($record)),
-                Tables\Actions\DeleteAction::make(),
-            ])
-            ->bulkActions([
-                Tables\Actions\BulkActionGroup::make([
-                    Tables\Actions\DeleteBulkAction::make(),
-                ]),
-            ]);
+            ->headerActions([])
+            ->actions([])
+            ->bulkActions([]);
     }
 }
