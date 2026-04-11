@@ -89,14 +89,14 @@
                 Первая карточка — выбранный товар; далее только аналоги, которые есть в каталоге как отдельные позиции.
             </p>
 
-            <div class="grid grid-cols-1 items-start gap-5 sm:grid-cols-2">
-                <div class="flex min-h-full flex-col gap-3">
-                    <p class="text-center text-[11px] font-bold uppercase tracking-wide text-orange-900 sm:text-left">Выбранная деталь</p>
+            <div class="grid grid-cols-1 gap-5 sm:grid-cols-2 sm:items-stretch">
+                <div class="flex h-full min-h-0 flex-col gap-3">
+                    <p class="shrink-0 text-center text-[11px] font-bold uppercase tracking-wide text-orange-900 sm:text-left">Выбранная деталь</p>
                     <x-storefront-product-card
                         :product="$main"
                         :selectedVehicleLabel="$this->selectedVehicleLabel"
                         :hide-cross-preview="true"
-                        class="ring-2 ring-orange-400/50"
+                        class="min-h-0 flex-1 ring-2 ring-orange-400/50"
                     >
                         @livewire('storefront.add-to-cart-button', ['product' => $main], key('hf-cart-'.$main->id))
                         <p class="mt-3 text-center sm:text-left">
@@ -108,9 +108,11 @@
                 </div>
 
                 @foreach($this->crossAnalogRows as $row)
-                    <div class="flex min-h-full flex-col gap-2">
-                        <p class="text-center text-[11px] font-bold uppercase tracking-wide text-slate-600 sm:text-left">Аналог</p>
+                    <div class="flex h-full min-h-0 flex-col gap-2">
+                        <p class="shrink-0 text-center text-[11px] font-bold uppercase tracking-wide text-slate-600 sm:text-left">Аналог</p>
                         <x-storefront-product-card
+                            split-layout
+                            class="min-h-0 flex-1"
                             :product="$row->linked"
                             :selectedVehicleLabel="$this->selectedVehicleLabel"
                             :cross-caption="'По кроссу: '.$row->cross->storefrontAnalogLabel()"

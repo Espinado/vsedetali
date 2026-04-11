@@ -22,6 +22,17 @@ if (config('app.debug')) {
     });
 }
 
+if (app()->isLocal()) {
+    Route::get('/__design/product-cards', function () {
+        $demo = Product::query()
+            ->with(['brand', 'category', 'images', 'stocks', 'crossNumbers', 'vehicles'])
+            ->active()
+            ->first();
+
+        return view('storefront.design-product-cards', ['demo' => $demo]);
+    })->name('design.product-cards');
+}
+
 // Auth (guest)
 Route::middleware('guest')->group(function () {
     Route::get('/login', [AuthController::class, 'showLoginForm'])->name('login');
