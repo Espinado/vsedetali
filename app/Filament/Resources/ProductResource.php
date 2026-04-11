@@ -4,6 +4,7 @@ namespace App\Filament\Resources;
 
 use App\Filament\Concerns\AuthorizesCatalogResource;
 use App\Filament\Resources\ProductResource\Pages;
+use App\Filament\Support\FilamentSweetAlert;
 use App\Models\Product;
 use Filament\Forms;
 use Filament\Forms\Form;
@@ -121,7 +122,9 @@ class ProductResource extends Resource
             ->actions([Tables\Actions\EditAction::make()])
             ->bulkActions([
                 Tables\Actions\BulkActionGroup::make([
-                    Tables\Actions\DeleteBulkAction::make(),
+                    tap(Tables\Actions\DeleteBulkAction::make(), function (Tables\Actions\DeleteBulkAction $action): void {
+                        FilamentSweetAlert::configureBulkDelete($action, 'Удалить выбранные товары?', 'Будет удалено товаров:');
+                    }),
                 ]),
             ]);
     }

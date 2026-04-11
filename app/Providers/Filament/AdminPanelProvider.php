@@ -34,7 +34,7 @@ class AdminPanelProvider extends PanelProvider
             ->brandName(config('app.name'))
             ->login()
             ->colors([
-                'primary' => Color::Blue,
+                'primary' => Color::Orange,
             ])
             ->discoverResources(in: app_path('Filament/Resources'), for: 'App\\Filament\\Resources')
             ->discoverPages(in: app_path('Filament/Pages'), for: 'App\\Filament\\Pages')
@@ -95,6 +95,10 @@ class AdminPanelProvider extends PanelProvider
             ->authMiddleware([
                 Authenticate::class,
             ])
+            ->renderHook(
+                PanelsRenderHook::BODY_START,
+                fn (): string => view('filament.hooks.sweetalert-assets')->render()
+            )
             ->renderHook(
                 'panels::head.start',
                 fn (): string => '<meta name="csrf-token" content="'.e(csrf_token()).'">'

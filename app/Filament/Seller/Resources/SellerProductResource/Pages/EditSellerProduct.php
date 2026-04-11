@@ -3,12 +3,14 @@
 namespace App\Filament\Seller\Resources\SellerProductResource\Pages;
 
 use App\Filament\Seller\Resources\SellerProductResource;
+use App\Filament\Support\FilamentSweetAlert;
 use App\Models\ProductImage;
 use App\Models\SellerStaff;
 use App\Models\Vehicle;
 use App\Models\Warehouse;
 use App\Support\SellerListingVehicleCompatibilities;
 use Filament\Actions;
+use Filament\Actions\DeleteAction;
 use Filament\Resources\Pages\EditRecord;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\DB;
@@ -23,6 +25,27 @@ class EditSellerProduct extends EditRecord
      * @var array{name: string, images: list<string>, vehicle_ids: array<int>}|null
      */
     protected ?array $catalogUpdatePayload = null;
+
+    protected function getRedirectUrl(): ?string
+    {
+        return static::getResource()::getUrl('index');
+    }
+
+    protected function getSavedNotificationTitle(): ?string
+    {
+        return '';
+    }
+
+    protected function configureDeleteAction(DeleteAction $action): void
+    {
+        parent::configureDeleteAction($action);
+
+        FilamentSweetAlert::configureHeaderDelete(
+            $action,
+            'Удалить позицию на площадке?',
+            'Карточка товара в каталоге останется; связь продавца с позицией будет удалена.',
+        );
+    }
 
     protected function getHeaderActions(): array
     {

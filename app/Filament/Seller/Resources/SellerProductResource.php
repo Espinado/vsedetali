@@ -4,6 +4,7 @@ namespace App\Filament\Seller\Resources;
 
 use App\Authorization\StaffPermission;
 use App\Filament\Seller\Resources\SellerProductResource\Pages;
+use App\Filament\Support\FilamentSweetAlert;
 use App\Models\SellerProduct;
 use App\Models\SellerStaff;
 use App\Models\Vehicle;
@@ -298,7 +299,9 @@ class SellerProductResource extends Resource
             ])
             ->bulkActions([
                 Tables\Actions\BulkActionGroup::make([
-                    Tables\Actions\DeleteBulkAction::make(),
+                    tap(Tables\Actions\DeleteBulkAction::make(), function (Tables\Actions\DeleteBulkAction $action): void {
+                        FilamentSweetAlert::configureBulkDelete($action, 'Удалить выбранные позиции?', 'Будет удалено позиций:');
+                    }),
                 ]),
             ]);
     }

@@ -10,6 +10,7 @@ use Filament\Http\Middleware\DispatchServingFilamentEvent;
 use Filament\Panel;
 use Filament\PanelProvider;
 use Filament\Support\Colors\Color;
+use Filament\View\PanelsRenderHook;
 use Filament\Widgets;
 use Illuminate\Cookie\Middleware\AddQueuedCookiesToResponse;
 use Illuminate\Cookie\Middleware\EncryptCookies;
@@ -31,7 +32,7 @@ class SellerPanelProvider extends PanelProvider
             ->brandName(config('app.name').' — продавец')
             ->login()
             ->colors([
-                'primary' => Color::Emerald,
+                'primary' => Color::Orange,
             ])
             ->discoverResources(in: app_path('Filament/Seller/Resources'), for: 'App\\Filament\\Seller\\Resources')
             ->pages([
@@ -54,6 +55,10 @@ class SellerPanelProvider extends PanelProvider
             ])
             ->authMiddleware([
                 Authenticate::class,
-            ]);
+            ])
+            ->renderHook(
+                PanelsRenderHook::BODY_START,
+                fn (): string => view('filament.hooks.sweetalert-assets')->render()
+            );
     }
 }

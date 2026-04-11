@@ -1,13 +1,13 @@
-<div class="max-w-3xl mx-auto">
-    <h1 class="text-2xl font-bold mb-6">Оформление заказа</h1>
+<div class="mx-auto max-w-3xl px-0 sm:px-0">
+    <h1 class="mb-4 text-xl font-bold sm:mb-6 sm:text-2xl">Оформление заказа</h1>
 
     {{-- Step indicator --}}
-    <nav class="flex items-center gap-2 mb-8 text-sm">
-        <span class="{{ $step >= 1 ? 'text-indigo-600 font-medium' : 'text-slate-400' }}">1. Контакты</span>
-        <span class="text-slate-300">→</span>
-        <span class="{{ $step >= 2 ? 'text-indigo-600 font-medium' : 'text-slate-400' }}">2. Доставка</span>
-        <span class="text-slate-300">→</span>
-        <span class="{{ $step >= 3 ? 'text-indigo-600 font-medium' : 'text-slate-400' }}">3. Подтверждение</span>
+    <nav class="mb-6 flex flex-col gap-2 text-sm sm:mb-8 sm:flex-row sm:flex-wrap sm:items-center sm:gap-x-2 sm:gap-y-1" aria-label="Шаги оформления">
+        <span class="{{ $step >= 1 ? 'text-orange-600 font-medium' : 'text-slate-400' }}">1. Контакты</span>
+        <span class="hidden text-slate-300 sm:inline" aria-hidden="true">→</span>
+        <span class="{{ $step >= 2 ? 'text-orange-600 font-medium' : 'text-slate-400' }}">2. Доставка</span>
+        <span class="hidden text-slate-300 sm:inline" aria-hidden="true">→</span>
+        <span class="{{ $step >= 3 ? 'text-orange-600 font-medium' : 'text-slate-400' }}">3. Подтверждение</span>
     </nav>
 
     @if ($this->cart->cartItems->isEmpty())
@@ -23,28 +23,28 @@
 
         {{-- Step 1: Contacts --}}
         @if ($step === 1)
-            <div class="space-y-4 bg-white rounded-lg border border-slate-200 p-6">
+            <div class="space-y-4 rounded-lg border border-slate-200 bg-white p-4 sm:p-6">
                 <h2 class="text-lg font-semibold">Контактные данные</h2>
                 <div>
                     <label for="customer_name" class="block text-sm font-medium text-slate-700 mb-1">Имя *</label>
                     <input type="text" id="customer_name" wire:model="customer_name"
-                           class="w-full rounded border-slate-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500">
+                           class="w-full rounded border-slate-300 shadow-sm focus:border-orange-500 focus:ring-orange-500">
                     @error('customer_name') <span class="text-red-600 text-sm">{{ $message }}</span> @enderror
                 </div>
                 <div>
                     <label for="customer_email" class="block text-sm font-medium text-slate-700 mb-1">Email *</label>
                     <input type="email" id="customer_email" wire:model="customer_email"
-                           class="w-full rounded border-slate-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500">
+                           class="w-full rounded border-slate-300 shadow-sm focus:border-orange-500 focus:ring-orange-500">
                     @error('customer_email') <span class="text-red-600 text-sm">{{ $message }}</span> @enderror
                 </div>
                 <div>
                     <label for="customer_phone" class="block text-sm font-medium text-slate-700 mb-1">Телефон</label>
                     <input type="text" id="customer_phone" wire:model="customer_phone"
-                           class="w-full rounded border-slate-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500">
+                           class="w-full rounded border-slate-300 shadow-sm focus:border-orange-500 focus:ring-orange-500">
                     @error('customer_phone') <span class="text-red-600 text-sm">{{ $message }}</span> @enderror
                 </div>
                 <div class="pt-2">
-                    <button type="submit" class="px-4 py-2 bg-indigo-600 text-white rounded hover:bg-indigo-700">
+                    <button type="submit" class="btn-store-cta w-full sm:w-auto">
                         Далее →
                     </button>
                 </div>
@@ -54,8 +54,8 @@
         {{-- Step 2: Delivery --}}
         @if ($step === 2)
             <div class="space-y-6">
-                <div class="bg-white rounded-lg border border-slate-200 p-6">
-                    <h2 class="text-lg font-semibold mb-4">Адрес доставки</h2>
+                <div class="rounded-lg border border-slate-200 bg-white p-4 sm:p-6">
+                    <h2 class="mb-4 text-lg font-semibold">Адрес доставки</h2>
                     @if ($this->addresses->isNotEmpty())
                         <div class="space-y-2 mb-4">
                             @foreach ($this->addresses as $addr)
@@ -117,9 +117,9 @@
                     ...
                 </div>
                 --}}
-                <div class="flex gap-3">
-                    <button type="button" wire:click="stepBack" class="px-4 py-2 border border-slate-300 rounded hover:bg-slate-50">← Назад</button>
-                    <button type="submit" class="px-4 py-2 bg-indigo-600 text-white rounded hover:bg-indigo-700">Далее →</button>
+                <div class="flex flex-col-reverse gap-3 sm:flex-row">
+                    <button type="button" wire:click="stepBack" class="min-h-11 w-full rounded border border-slate-300 px-4 py-2.5 hover:bg-slate-50 sm:w-auto">← Назад</button>
+                    <button type="submit" class="btn-store-cta w-full sm:w-auto">Далее →</button>
                 </div>
             </div>
         @endif
@@ -127,8 +127,8 @@
         {{-- Step 3: Confirm --}}
         @if ($step === 3)
             <div class="space-y-6">
-                <div class="bg-white rounded-lg border border-slate-200 p-6">
-                    <h2 class="text-lg font-semibold mb-4">Итого</h2>
+                <div class="rounded-lg border border-slate-200 bg-white p-4 sm:p-6">
+                    <h2 class="mb-4 text-lg font-semibold">Итого</h2>
                     <dl class="space-y-2 text-sm">
                         <div class="flex justify-between">
                             <dt>Товары</dt>
@@ -144,24 +144,24 @@
                         </div>
                     </dl>
                 </div>
-                <div class="bg-white rounded-lg border border-slate-200 p-6">
-                    <h2 class="text-lg font-semibold mb-4">Состав заказа</h2>
+                <div class="rounded-lg border border-slate-200 bg-white p-4 sm:p-6">
+                    <h2 class="mb-4 text-lg font-semibold">Состав заказа</h2>
                     <ul class="divide-y divide-slate-200">
                         @foreach ($this->cart->cartItems as $item)
-                            <li class="py-2 flex justify-between text-sm">
-                                <span>{{ $item->product->name }} × {{ $item->quantity }}</span>
-                                <span>{{ number_format($item->price * $item->quantity, 2) }} {{ \App\Models\Setting::get('currency', 'RUB') }}</span>
+                            <li class="flex flex-col gap-1 py-3 text-sm sm:flex-row sm:items-start sm:justify-between sm:gap-4">
+                                <span class="min-w-0 break-words">{{ $item->product->name }} × {{ $item->quantity }}</span>
+                                <span class="shrink-0 font-medium sm:text-right">{{ number_format($item->price * $item->quantity, 2) }} {{ \App\Models\Setting::get('currency', 'RUB') }}</span>
                             </li>
                         @endforeach
                     </ul>
                 </div>
-                <div class="bg-white rounded-lg border border-slate-200 p-6">
+                <div class="rounded-lg border border-slate-200 bg-white p-4 sm:p-6">
                     <label class="block text-sm font-medium text-slate-700 mb-2">Комментарий к заказу</label>
                     <textarea wire:model="comment" rows="2" class="w-full rounded border-slate-300" placeholder="Необязательно"></textarea>
                 </div>
-                <div class="flex gap-3">
-                    <button type="button" wire:click="stepBack" class="px-4 py-2 border border-slate-300 rounded hover:bg-slate-50">← Назад</button>
-                    <button type="submit" class="px-6 py-3 bg-green-600 text-white rounded font-medium hover:bg-green-700" wire:loading.attr="disabled">
+                <div class="flex flex-col-reverse gap-3 sm:flex-row">
+                    <button type="button" wire:click="stepBack" class="min-h-11 w-full rounded border border-slate-300 px-4 py-2.5 hover:bg-slate-50 sm:w-auto">← Назад</button>
+                    <button type="submit" class="btn-store-cta w-full min-h-12 py-3.5 sm:w-auto" wire:loading.attr="disabled">
                         <span wire:loading.remove>Оформить заказ</span>
                         <span wire:loading>Оформление…</span>
                     </button>

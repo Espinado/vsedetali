@@ -11,7 +11,7 @@
 @endpush
 
 @section('content')
-    <nav class="text-sm text-slate-500 mb-6" aria-label="Навигация">
+    <nav class="mb-6 -mx-1 overflow-x-auto whitespace-nowrap px-1 text-sm text-slate-500 sm:whitespace-normal sm:overflow-visible" aria-label="Навигация">
         <a href="{{ route('catalog') }}" class="font-medium text-slate-700 hover:text-slate-900">Каталог</a>
         @if($product->category)
             @foreach($product->category->ancestorsChainForStorefront() as $cat)
@@ -24,7 +24,7 @@
     <div class="flex flex-col lg:flex-row gap-8 lg:gap-12">
         {{-- Галерея --}}
         <div class="lg:w-1/2 shrink-0">
-            <div class="aspect-square rounded-lg border border-slate-200 bg-slate-100 overflow-hidden mb-4">
+            <div class="mb-4 aspect-square overflow-hidden rounded-2xl border border-orange-100/90 bg-stone-100 shadow-sm">
                 @if($product->images->isNotEmpty())
                     <img src="{{ $product->images->first()->storage_url }}"
                          alt="{{ $product->images->first()->alt ?? $product->name }}"
@@ -35,10 +35,10 @@
                 @endif
             </div>
             @if($product->images->count() > 1)
-                <div class="flex gap-2 overflow-x-auto pb-2">
+                <div class="flex gap-2 overflow-x-auto pb-2 [-webkit-overflow-scrolling:touch]">
                     @foreach($product->images as $image)
                         <button type="button"
-                                class="w-16 h-16 shrink-0 rounded border-2 border-slate-200 hover:border-slate-400 overflow-hidden focus:border-slate-600"
+                                class="h-16 w-16 min-h-[3.5rem] min-w-[3.5rem] shrink-0 overflow-hidden rounded-lg border-2 border-orange-100 transition hover:border-orange-300 focus:border-orange-500 focus:outline-none"
                                 onclick="document.getElementById('product-main-image').src = '{{ $image->storage_url }}'">
                             <img src="{{ $image->storage_url }}" alt="" class="w-full h-full object-cover">
                         </button>
@@ -52,25 +52,25 @@
             @if($product->brand)
                 <p class="text-sm text-slate-500 mb-1">{{ $product->brand->name }}</p>
             @endif
-            <h1 class="text-2xl font-bold text-slate-900 mb-2">{{ $product->name }}</h1>
+            <h1 class="mb-2 text-xl font-bold text-slate-900 sm:text-2xl">{{ $product->name }}</h1>
             <p class="text-slate-600 mb-4">Артикул: <span class="font-mono">{{ $product->sku }}</span></p>
 
-            <p class="text-2xl font-semibold text-slate-900 mb-2">
+            <p class="mb-2 text-3xl font-bold tracking-tight text-orange-800 sm:text-4xl">
                 {{ number_format($product->price, 2) }} {{ \App\Models\Setting::get('currency', 'RUB') }}
             </p>
             <p class="mb-6">
                 @if($product->in_stock)
-                    <span class="text-green-600 font-medium">В наличии</span>
+                    <span class="inline-flex items-center rounded-full bg-emerald-50 px-3 py-1 text-sm font-semibold text-emerald-800 ring-1 ring-emerald-200/80">В наличии</span>
                     @if($product->total_stock < 10)
-                        <span class="text-slate-500 text-sm">(осталось {{ $product->total_stock }} шт.)</span>
+                        <span class="ml-2 text-sm text-stone-500">осталось {{ $product->total_stock }} шт.</span>
                     @endif
                 @else
-                    <span class="text-amber-600 font-medium">Под заказ</span>
+                    <span class="inline-flex items-center rounded-full bg-amber-50 px-3 py-1 text-sm font-semibold text-amber-900 ring-1 ring-amber-200/80">Под заказ</span>
                 @endif
             </p>
 
             @if($product->oemNumbers->isNotEmpty() || $crossAnalogItems->isNotEmpty() || $vehiclesCompatLinks->isNotEmpty())
-                <div class="mb-6 rounded-xl border border-slate-200 bg-slate-50 p-4">
+                <div class="mb-6 rounded-2xl border border-orange-100/90 bg-gradient-to-br from-orange-50/80 to-amber-50/40 p-4 shadow-sm">
                     <h2 class="text-sm font-semibold text-slate-800 mb-3">Кратко</h2>
 
                     <div class="space-y-2 text-sm">
@@ -125,7 +125,7 @@
     @if($product->description)
         <section class="mt-12 pt-8 border-t border-slate-200">
             <h2 class="text-lg font-semibold text-slate-800 mb-4">Описание</h2>
-            <div class="prose prose-slate max-w-none text-slate-600">
+            <div class="prose prose-slate max-w-none overflow-x-auto break-words text-slate-600">
                 {!! nl2br(e($product->description)) !!}
             </div>
         </section>
@@ -157,8 +157,8 @@
         <section id="analogs" class="mt-12 pt-8 border-t border-slate-200 scroll-mt-8">
             <h2 class="text-lg font-semibold text-slate-800 mb-4">Аналоги других производителей</h2>
             <p class="text-sm text-slate-500 mb-4">Показываются только аналоги, которые есть в нашем каталоге как отдельные товары (совпадение номера).</p>
-            <div class="overflow-x-auto rounded-lg border border-slate-200">
-                <table class="min-w-full text-sm text-left">
+            <div class="-mx-1 overflow-x-auto rounded-lg border border-slate-200 sm:mx-0 [-webkit-overflow-scrolling:touch]">
+                <table class="min-w-[32rem] w-full text-left text-sm sm:min-w-full">
                     <thead class="bg-slate-50 text-slate-600 font-medium border-b border-slate-200">
                         <tr>
                             <th class="px-4 py-3">Производитель аналога</th>

@@ -2,6 +2,7 @@
 
 namespace App\Filament\Resources\ProductResource\RelationManagers;
 
+use App\Filament\Support\FilamentSweetAlert;
 use App\Models\ProductImage;
 use Filament\Forms;
 use Filament\Forms\Form;
@@ -74,11 +75,15 @@ class ImagesRelationManager extends RelationManager
                         $record->update(['is_main' => true]);
                     })
                     ->visible(fn (ProductImage $record): bool => ! $record->is_main),
-                Tables\Actions\DeleteAction::make(),
+                tap(Tables\Actions\DeleteAction::make(), function (Tables\Actions\DeleteAction $action): void {
+                    FilamentSweetAlert::configureTableDelete($action, 'Удалить изображение?', 'Файл будет удалён из хранилища.');
+                }),
             ])
             ->bulkActions([
                 Tables\Actions\BulkActionGroup::make([
-                    Tables\Actions\DeleteBulkAction::make(),
+                    tap(Tables\Actions\DeleteBulkAction::make(), function (Tables\Actions\DeleteBulkAction $action): void {
+                        FilamentSweetAlert::configureBulkDelete($action, 'Удалить выбранные изображения?', 'Будет удалено файлов:');
+                    }),
                 ]),
             ]);
     }

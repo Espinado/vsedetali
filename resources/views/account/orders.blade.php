@@ -3,12 +3,12 @@
 @section('title', 'Мои заказы')
 
 @section('content')
-<div class="max-w-4xl mx-auto">
-    <h1 class="text-2xl font-bold mb-6">Мои заказы</h1>
+<div class="mx-auto max-w-4xl min-w-0">
+    <h1 class="mb-4 text-xl font-bold sm:mb-6 sm:text-2xl">Мои заказы</h1>
 
     @if($orders->isEmpty())
         <p class="text-slate-600 py-8">У вас пока нет заказов.</p>
-        <a href="{{ route('catalog') }}" class="inline-block px-4 py-2 bg-indigo-600 text-white rounded hover:bg-indigo-700">Перейти в каталог</a>
+        <a href="{{ route('catalog') }}" class="btn-store-cta-sm min-h-11 px-6">Перейти в каталог</a>
     @else
         <ul class="divide-y divide-slate-200 bg-white rounded-lg border border-slate-200 overflow-hidden">
             @foreach($orders as $order)
@@ -18,7 +18,7 @@
                             <span class="font-medium text-slate-900">Заказ #{{ $order->id }}</span>
                             <span class="ml-2 text-sm text-slate-500">{{ $order->created_at->format('d.m.Y H:i') }}</span>
                         </div>
-                        <div class="flex items-center gap-3">
+                        <div class="flex flex-wrap items-center gap-2 sm:gap-3">
                             <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium"
                                   style="background-color: {{ $order->status->color ?? '#e2e8f0' }}30; color: {{ $order->status->color ?? '#64748b' }};">
                                 {{ $order->status->name }}
@@ -33,7 +33,7 @@
                 </li>
             @endforeach
         </ul>
-        <div class="mt-4">
+        <div class="mt-4 overflow-x-auto pb-2">
             {{ $orders->links() }}
         </div>
     @endif

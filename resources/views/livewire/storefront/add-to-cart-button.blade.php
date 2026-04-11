@@ -1,18 +1,18 @@
 <div>
-    <div class="flex flex-wrap items-end gap-4">
+    <div class="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-end">
         <div class="flex items-center gap-2">
-            <label for="qty-{{ $product->id }}" class="text-sm text-slate-600">Кол-во:</label>
+            <label for="qty-{{ $product->id }}" class="shrink-0 text-sm text-slate-600">Кол-во:</label>
             <input type="number"
                    id="qty-{{ $product->id }}"
                    min="1"
                    max="99"
                    wire:model="quantity"
-                   class="w-20 rounded-lg border-slate-300 shadow-sm text-sm">
+                   class="h-11 w-24 rounded-lg border-slate-300 text-center text-sm shadow-sm">
         </div>
         <button type="button"
                 wire:click="addToCart"
                 wire:loading.attr="disabled"
-                class="px-6 py-3 bg-slate-800 text-white rounded-lg hover:bg-slate-700 disabled:opacity-50 text-sm font-medium">
+                class="btn-store-cta w-full sm:w-auto">
             <span wire:loading.remove>В корзину</span>
             <span wire:loading>Добавление...</span>
         </button>

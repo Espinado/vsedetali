@@ -10,6 +10,26 @@
         'Segoe UI Symbol', 'Noto Color Emoji';
 }
 
+/* Витрина и ЛК: читаемый масштаб на iOS, без горизонтального «вылезания» */
+@layer base {
+    html {
+        -webkit-text-size-adjust: 100%;
+        text-size-adjust: 100%;
+    }
+
+    body {
+        overflow-x: hidden;
+    }
+
+    /* Удобнее тап по ссылкам/кнопкам в шапке и формах */
+    @media (max-width: 639px) {
+        a,
+        button {
+            -webkit-tap-highlight-color: rgb(234 88 12 / 0.12);
+        }
+    }
+}
+
 /* Аккордеон сайдбара каталога (<details>) */
 @layer components {
     .sidebar-accordion > summary {
@@ -21,5 +41,18 @@
     /* Только шеврон в summary этого же <details>, не вложенных аккордеонов */
     .sidebar-accordion[open] > summary .sidebar-accordion-chevron {
         @apply rotate-180;
+    }
+
+    /* Основные CTA витрины */
+    .btn-store-cta {
+        @apply inline-flex min-h-11 items-center justify-center rounded-xl bg-orange-600 px-6 py-3 text-sm font-semibold text-white shadow-md shadow-orange-600/25 transition hover:bg-orange-700 hover:shadow-lg hover:shadow-orange-600/30 active:scale-[0.98] disabled:pointer-events-none disabled:opacity-50;
+    }
+
+    .btn-store-cta-sm {
+        @apply inline-flex items-center justify-center rounded-lg bg-orange-600 px-4 py-2 text-sm font-semibold text-white shadow-sm shadow-orange-600/20 transition hover:bg-orange-700 hover:shadow-md hover:shadow-orange-600/25 active:scale-[0.98];
+    }
+
+    .card-store-product {
+        @apply overflow-hidden rounded-2xl border border-orange-100/90 bg-white shadow-sm shadow-stone-900/5 transition hover:border-orange-200 hover:shadow-md hover:shadow-orange-950/10;
     }
 }

@@ -2,8 +2,10 @@
 <html>
 <head>
     <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
     <style>
-        body { font-family: sans-serif; line-height: 1.5; color: #334155; max-width: 640px; margin: 0 auto; padding: 20px; }
+        *, *::before, *::after { box-sizing: border-box; }
+        body { font-family: sans-serif; line-height: 1.5; color: #334155; max-width: 640px; margin: 0 auto; padding: 16px; word-wrap: break-word; overflow-wrap: anywhere; }
         h1 { font-size: 1.25rem; color: #0f172a; }
         table { width: 100%; border-collapse: collapse; margin: 1rem 0; }
         th, td { padding: 8px 12px; text-align: left; border-bottom: 1px solid #e2e8f0; }

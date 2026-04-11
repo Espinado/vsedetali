@@ -2,6 +2,7 @@
 
 namespace App\Filament\Resources\ProductResource\RelationManagers;
 
+use App\Filament\Support\FilamentSweetAlert;
 use App\Models\Warehouse;
 use Filament\Forms;
 use Filament\Forms\Form;
@@ -95,11 +96,15 @@ class StocksRelationManager extends RelationManager
             ])
             ->actions([
                 Tables\Actions\EditAction::make(),
-                Tables\Actions\DeleteAction::make(),
+                tap(Tables\Actions\DeleteAction::make(), function (Tables\Actions\DeleteAction $action): void {
+                    FilamentSweetAlert::configureTableDelete($action, 'Удалить запись по складу?', 'Остаток по этому складу будет удалён.');
+                }),
             ])
             ->bulkActions([
                 Tables\Actions\BulkActionGroup::make([
-                    Tables\Actions\DeleteBulkAction::make(),
+                    tap(Tables\Actions\DeleteBulkAction::make(), function (Tables\Actions\DeleteBulkAction $action): void {
+                        FilamentSweetAlert::configureBulkDelete($action, 'Удалить выбранные остатки?', 'Будет удалено записей:');
+                    }),
                 ]),
             ]);
     }

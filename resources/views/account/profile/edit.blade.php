@@ -3,8 +3,8 @@
 @section('title', 'Редактирование профиля')
 
 @section('content')
-<div class="max-w-md mx-auto">
-    <h1 class="text-2xl font-bold mb-6">Редактирование профиля</h1>
+<div class="mx-auto max-w-md min-w-0">
+    <h1 class="mb-4 text-xl font-bold sm:mb-6 sm:text-2xl">Редактирование профиля</h1>
 
     @if (session('success'))
         <div class="mb-4 p-3 bg-green-100 text-green-800 rounded text-sm">{{ session('success') }}</div>
@@ -18,7 +18,7 @@
         </div>
     @endif
 
-    <form method="POST" action="{{ route('account.profile.update') }}" class="space-y-4 bg-white rounded-lg border border-slate-200 p-6">
+    <form method="POST" action="{{ route('account.profile.update') }}" class="space-y-4 rounded-lg border border-slate-200 bg-white p-4 sm:p-6">
         @csrf
         @method('PUT')
         <div>
@@ -42,9 +42,9 @@
             <label for="password_confirmation" class="block text-sm font-medium text-slate-700 mb-1">Подтверждение пароля</label>
             <input type="password" name="password_confirmation" id="password_confirmation" class="w-full rounded border-slate-300" autocomplete="new-password">
         </div>
-        <div class="pt-2 flex gap-2">
-            <button type="submit" class="px-4 py-2 bg-indigo-600 text-white rounded hover:bg-indigo-700">Сохранить</button>
-            <a href="{{ route('account.dashboard') }}" class="px-4 py-2 border border-slate-300 rounded hover:bg-slate-50">Отмена</a>
+        <div class="flex flex-col gap-2 pt-2 sm:flex-row">
+            <button type="submit" class="min-h-11 w-full rounded bg-orange-600 px-4 py-2.5 text-white hover:bg-orange-700 sm:w-auto">Сохранить</button>
+            <a href="{{ route('account.dashboard') }}" class="inline-flex min-h-11 w-full items-center justify-center rounded border border-slate-300 px-4 py-2.5 hover:bg-slate-50 sm:w-auto">Отмена</a>
         </div>
     </form>
 </div>

@@ -10,6 +10,7 @@ use App\Observers\UserObserver;
 use Illuminate\Broadcasting\BroadcastManager;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\Schema;
+use Illuminate\Pagination\Paginator;
 use Illuminate\Support\Facades\View;
 use Illuminate\Support\ServiceProvider;
 
@@ -49,6 +50,13 @@ class AppServiceProvider extends ServiceProvider
         $this->app->booted(function (): void {
             require base_path('routes/broadcast_channels.php');
         });
+
+        // Кастомная пагинация Livewire (каталог и др.): views в resources/views/vendor/livewire должны иметь приоритет над пакетом.
+        $this->app->booted(function (): void {
+            if (is_dir(resource_path('views/vendor/livewire'))) {
+                View::prependNamespace('livewire', [resource_path('views/vendor/livewire')]);
+            }
+        });
     }
 
     /**
@@ -72,6 +80,9 @@ class AppServiceProvider extends ServiceProvider
         View::composer(['layouts.storefront', 'storefront.*'], function ($view): void {
             $view->with('storeName', Setting::get('store_name', config('app.name')));
         });
+
+        Paginator::defaultView('vendor.pagination.tailwind');
+        Paginator::defaultSimpleView('vendor.pagination.simple-tailwind');
 
         View::composer('layouts.storefront', function ($view): void {
             $data = $view->getData();

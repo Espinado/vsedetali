@@ -3,11 +3,11 @@
 @section('title', 'Оплата заказа #' . $order->id)
 
 @section('content')
-<div class="max-w-2xl mx-auto">
-    <div class="bg-white rounded-2xl border border-slate-200 shadow-sm p-8 text-center">
-        <div class="mx-auto mb-6 h-16 w-16 rounded-full border-4 border-slate-200 border-t-indigo-600 animate-spin"></div>
+<div class="mx-auto max-w-2xl min-w-0">
+    <div class="rounded-2xl border border-slate-200 bg-white p-5 text-center shadow-sm sm:p-8">
+        <div class="mx-auto mb-6 h-16 w-16 rounded-full border-4 border-slate-200 border-t-orange-600 animate-spin"></div>
 
-        <h1 class="text-2xl font-bold text-slate-900 mb-3">Идёт оформление заказа</h1>
+        <h1 class="mb-3 text-xl font-bold text-slate-900 sm:text-2xl">Идёт оформление заказа</h1>
         <p class="text-slate-600 mb-2">
             Заказ #{{ $order->id }} создан. Обрабатываем данные.
         </p>
@@ -27,7 +27,7 @@
         </div>
 
         <div class="mt-6">
-            <a href="{{ route('checkout.success', $order) }}" class="text-indigo-600 hover:underline">
+            <a href="{{ route('checkout.success', $order) }}" class="text-orange-600 hover:underline">
                 Если редирект не сработал, нажмите здесь
             </a>
         </div>

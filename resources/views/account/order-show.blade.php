@@ -3,13 +3,13 @@
 @section('title', 'Заказ #' . $order->id)
 
 @section('content')
-<div class="max-w-4xl mx-auto">
-    <div class="mb-6 flex items-center justify-between">
-        <h1 class="text-2xl font-bold">Заказ #{{ $order->id }}</h1>
-        <a href="{{ route('account.orders.index') }}" class="text-indigo-600 hover:underline">← К списку заказов</a>
+<div class="mx-auto max-w-4xl min-w-0">
+    <div class="mb-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <h1 class="text-xl font-bold sm:text-2xl">Заказ #{{ $order->id }}</h1>
+        <a href="{{ route('account.orders.index') }}" class="inline-flex min-h-10 items-center text-sm text-orange-600 hover:underline sm:text-base">← К списку заказов</a>
     </div>
 
-    <div class="mb-4 flex flex-wrap items-center gap-3">
+    <div class="mb-4 flex flex-wrap items-center gap-2 sm:gap-3">
         <span class="inline-flex items-center gap-2 px-3 py-1 rounded-full text-sm font-medium"
               style="background-color: {{ $order->status->color ?? '#e2e8f0' }}20; color: {{ $order->status->color ?? '#64748b' }};">
             {{ $order->status->name }}
@@ -25,16 +25,16 @@
     </div>
 
     <div class="grid gap-6 md:grid-cols-2 mb-8">
-        <div class="bg-white rounded-lg border border-slate-200 p-6">
-            <h2 class="text-lg font-semibold mb-3">Контактные данные</h2>
+        <div class="rounded-lg border border-slate-200 bg-white p-4 sm:p-6">
+            <h2 class="mb-3 text-lg font-semibold">Контактные данные</h2>
             <p class="text-slate-700">{{ $order->customer_name }}</p>
             <p class="text-slate-600 text-sm">{{ $order->customer_email }}</p>
             @if ($order->customer_phone)
                 <p class="text-slate-600 text-sm">{{ $order->customer_phone }}</p>
             @endif
         </div>
-        <div class="bg-white rounded-lg border border-slate-200 p-6">
-            <h2 class="text-lg font-semibold mb-3">Доставка</h2>
+        <div class="rounded-lg border border-slate-200 bg-white p-4 sm:p-6">
+            <h2 class="mb-3 text-lg font-semibold">Доставка</h2>
             <p class="text-slate-700 font-medium">{{ $order->shippingMethod->name ?? '—' }}</p>
             @php $addr = $order->shippingAddress(); @endphp
             @if ($addr)
@@ -47,9 +47,10 @@
         </div>
     </div>
 
-    <div class="bg-white rounded-lg border border-slate-200 overflow-hidden">
-        <h2 class="text-lg font-semibold p-4 border-b border-slate-200">Товары</h2>
-        <table class="w-full text-sm">
+    <div class="overflow-hidden rounded-lg border border-slate-200 bg-white">
+        <h2 class="border-b border-slate-200 p-4 text-lg font-semibold">Товары</h2>
+        <div class="-mx-1 overflow-x-auto sm:mx-0 [-webkit-overflow-scrolling:touch]">
+        <table class="w-full min-w-[36rem] text-sm sm:min-w-full">
             <thead class="bg-slate-50 text-left">
                 <tr>
                     <th class="px-4 py-3 font-medium text-slate-700">Товар</th>
@@ -74,7 +75,8 @@
                 @endforeach
             </tbody>
         </table>
-        <div class="p-4 border-t border-slate-200 bg-slate-50 space-y-1 text-sm">
+        </div>
+        <div class="space-y-1 border-t border-slate-200 bg-slate-50 p-4 text-sm">
             <div class="flex justify-between">
                 <span class="text-slate-600">Товары</span>
                 <span>{{ number_format((float) $order->subtotal, 2) }} {{ \App\Models\Setting::get('currency', 'RUB') }}</span>
