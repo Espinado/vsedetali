@@ -3,6 +3,7 @@
 namespace App\Filament\Resources\StaffResource\Pages;
 
 use App\Filament\Resources\StaffResource;
+use App\Filament\Support\FilamentSweetAlert;
 use App\Services\StaffInvitationService;
 use Filament\Actions\Action;
 use Filament\Notifications\Notification;
@@ -42,9 +43,6 @@ class CreateStaff extends CreateRecord
     {
         app(StaffInvitationService::class)->sendInvitation($this->record);
 
-        Notification::make()
-            ->title('Приглашение отправлено на '.$this->record->email)
-            ->success()
-            ->send();
+        FilamentSweetAlert::flashSuccess('Приглашение отправлено на '.$this->record->email);
     }
 }

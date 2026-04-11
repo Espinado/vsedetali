@@ -3,6 +3,7 @@
 namespace App\Filament\Seller\Resources\SellerStaffResource\Pages;
 
 use App\Filament\Seller\Resources\SellerStaffResource;
+use App\Filament\Support\FilamentSweetAlert;
 use App\Models\SellerStaff;
 use App\Services\SellerStaffInvitationService;
 use Filament\Actions\Action;
@@ -44,9 +45,6 @@ class CreateSellerStaff extends CreateRecord
     {
         app(SellerStaffInvitationService::class)->sendInvitation($this->record);
 
-        Notification::make()
-            ->title('Приглашение отправлено на '.$this->record->email)
-            ->success()
-            ->send();
+        FilamentSweetAlert::flashSuccess('Приглашение отправлено на '.$this->record->email);
     }
 }

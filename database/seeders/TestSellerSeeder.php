@@ -42,7 +42,7 @@ class TestSellerSeeder extends Seeder
             ]
         );
 
-        $email = 'seller-demo@vsedetali.test';
+        $email = 'seller-demo@vsedetalki.ru';
         $staff = SellerStaff::query()->firstOrNew(['email' => $email]);
         $staff->seller_id = $seller->id;
         $staff->name = 'Демо Админ';

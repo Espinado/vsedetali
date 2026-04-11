@@ -3,9 +3,10 @@
 namespace App\Filament\Resources\ChatConversationResource\Pages;
 
 use App\Filament\Resources\ChatConversationResource;
+use App\Filament\Support\FilamentSweetAlert;
 use App\Models\ChatMessage;
-use Filament\Notifications\Notification;
 use Filament\Resources\Pages\ViewRecord;
+use Filament\Support\Facades\FilamentView;
 use Illuminate\Contracts\Support\Htmlable;
 
 class ViewChatConversation extends ViewRecord
@@ -56,6 +57,8 @@ class ViewChatConversation extends ViewRecord
             'messages.staff',
         ]);
 
-        Notification::make()->title('Сообщение отправлено')->success()->send();
+        FilamentSweetAlert::flashSuccess('Сообщение отправлено');
+        $url = ChatConversationResource::getUrl('view', ['record' => $this->record]);
+        $this->redirect($url, navigate: FilamentView::hasSpaMode($url));
     }
 }

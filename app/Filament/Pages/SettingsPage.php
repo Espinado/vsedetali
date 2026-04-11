@@ -3,13 +3,14 @@
 namespace App\Filament\Pages;
 
 use App\Authorization\StaffPermission;
+use App\Filament\Support\FilamentSweetAlert;
 use App\Models\Setting;
 use Filament\Forms;
 use Filament\Forms\Form;
 use Filament\Forms\Concerns\InteractsWithForms;
 use Filament\Forms\Contracts\HasForms;
-use Filament\Notifications\Notification;
 use Filament\Pages\Page;
+use Filament\Support\Facades\FilamentView;
 
 class SettingsPage extends Page implements HasForms
 {
@@ -36,7 +37,7 @@ class SettingsPage extends Page implements HasForms
     public function mount(): void
     {
         $this->form->fill([
-            'store_name' => Setting::get('store_name', config('app.name')),
+            'store_name' => Setting::storeDisplayName(),
             'store_email' => Setting::get('store_email', ''),
             'store_phone' => Setting::get('store_phone', ''),
             'currency' => Setting::get('currency', 'RUB'),
@@ -95,7 +96,10 @@ class SettingsPage extends Page implements HasForms
         Setting::set('currency', $data['currency'] ?? 'RUB', 'general');
         Setting::set('orders_notify_email', $data['orders_notify_email'] ?? '', 'orders');
         Setting::set('site_meta_description', $data['site_meta_description'] ?? '', 'general');
-        Notification::make()->title('Настройки сохранены')->success()->send();
+
+        FilamentSweetAlert::flashSuccess('Настройки сохранены');
+        $url = static::getUrl();
+        $this->redirect($url, navigate: FilamentView::hasSpaMode($url));
     }
 
     protected function getFormActions(): array

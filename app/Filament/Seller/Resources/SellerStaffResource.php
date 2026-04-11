@@ -4,12 +4,13 @@ namespace App\Filament\Seller\Resources;
 
 use App\Authorization\StaffPermission;
 use App\Filament\Seller\Resources\SellerStaffResource\Pages;
+use App\Filament\Support\FilamentSweetAlert;
 use App\Models\SellerStaff;
 use App\Services\SellerStaffInvitationService;
 use Filament\Forms;
 use Filament\Forms\Form;
-use Filament\Notifications\Notification;
 use Filament\Resources\Resource;
+use Filament\Support\Facades\FilamentView;
 use Filament\Tables;
 use Filament\Tables\Actions\Action as TableAction;
 use Filament\Tables\Table;
@@ -134,12 +135,11 @@ class SellerStaffResource extends Resource
                     ->icon('heroicon-o-envelope')
                     ->requiresConfirmation()
                     ->visible(fn (SellerStaff $record): bool => ! $record->hasPasswordSet())
-                    ->action(function (SellerStaff $record): void {
+                    ->action(function (SellerStaff $record, $livewire): void {
                         app(SellerStaffInvitationService::class)->sendInvitation($record);
-                        Notification::make()
-                            ->title('Письмо отправлено на '.$record->email)
-                            ->success()
-                            ->send();
+                        FilamentSweetAlert::flashSuccess('Письмо отправлено на '.$record->email);
+                        $url = static::getUrl('index');
+                        $livewire->redirect($url, navigate: FilamentView::hasSpaMode($url));
                     }),
                 Tables\Actions\EditAction::make(),
                 Tables\Actions\DeleteAction::make(),

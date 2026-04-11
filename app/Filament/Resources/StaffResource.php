@@ -3,12 +3,13 @@
 namespace App\Filament\Resources;
 
 use App\Filament\Resources\StaffResource\Pages;
+use App\Filament\Support\FilamentSweetAlert;
 use App\Models\Staff;
 use App\Services\StaffInvitationService;
 use Filament\Forms;
 use Filament\Forms\Form;
-use Filament\Notifications\Notification;
 use Filament\Resources\Resource;
+use Filament\Support\Facades\FilamentView;
 use Filament\Tables;
 use Filament\Tables\Actions\Action as TableAction;
 use Filament\Tables\Table;
@@ -116,12 +117,11 @@ class StaffResource extends Resource
                     ->requiresConfirmation()
                     ->modalHeading('Отправить письмо для ввода пароля?')
                     ->modalDescription('На email сотрудника будет отправлена новая ссылка. Старая ссылка перестанет действовать.')
-                    ->action(function (Staff $record): void {
+                    ->action(function (Staff $record, $livewire): void {
                         app(StaffInvitationService::class)->sendInvitation($record);
-                        Notification::make()
-                            ->title('Письмо отправлено на '.$record->email)
-                            ->success()
-                            ->send();
+                        FilamentSweetAlert::flashSuccess('Письмо отправлено на '.$record->email);
+                        $url = static::getUrl('index');
+                        $livewire->redirect($url, navigate: FilamentView::hasSpaMode($url));
                     }),
                 Tables\Actions\EditAction::make(),
                 Tables\Actions\DeleteAction::make(),

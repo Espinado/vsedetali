@@ -1,4 +1,4 @@
-# Структура Laravel-проекта (vsedetalki)
+# Структура Laravel-проекта (vsedetalki.ru)
 
 Структура приложения для интернет-магазина автозапчастей на Laravel 12 + Livewire с разделением на витрину (storefront), личный кабинет (account) и админку (admin).
 

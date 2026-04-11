@@ -2,7 +2,7 @@
     "$schema": "https://getcomposer.org/schema.json",
     "name": "vsedetalki/shop",
     "type": "project",
-    "description": "Интернет-магазин автозапчастей vsedetalki.",
+    "description": "Интернет-магазин автозапчастей vsedetalki.ru.",
     "keywords": ["laravel", "framework"],
     "license": "MIT",
     "conflict": {

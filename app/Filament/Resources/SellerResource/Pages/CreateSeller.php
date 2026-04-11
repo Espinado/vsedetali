@@ -3,6 +3,7 @@
 namespace App\Filament\Resources\SellerResource\Pages;
 
 use App\Filament\Resources\SellerResource;
+use App\Filament\Support\FilamentSweetAlert;
 use App\Models\SellerStaff;
 use App\Models\Warehouse;
 use App\Services\SellerStaffInvitationService;
@@ -93,9 +94,6 @@ class CreateSeller extends CreateRecord
             'is_active' => true,
         ]);
 
-        Notification::make()
-            ->title('Продавец создан. Приглашение отправлено на '.$this->adminEmail)
-            ->success()
-            ->send();
+        FilamentSweetAlert::flashSuccess('Продавец создан. Приглашение отправлено на '.$this->adminEmail);
     }
 }

@@ -527,7 +527,7 @@ class ProductGrid extends Component
     public function render()
     {
         $category = $this->category;
-        $storeName = Setting::get('store_name', config('app.name'));
+        $storeName = Setting::storeDisplayName();
 
         $titleSegment = $category
             ? ($category->meta_title ?: $category->name.' — Каталог')

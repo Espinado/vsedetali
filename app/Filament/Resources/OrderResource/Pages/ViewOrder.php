@@ -3,11 +3,12 @@
 namespace App\Filament\Resources\OrderResource\Pages;
 
 use App\Filament\Resources\OrderResource;
+use App\Filament\Support\FilamentSweetAlert;
 use App\Models\OrderStatus;
 use App\Models\Shipment;
 use Filament\Actions;
-use Filament\Notifications\Notification;
 use Filament\Resources\Pages\ViewRecord;
+use Filament\Support\Facades\FilamentView;
 
 class ViewOrder extends ViewRecord
 {
@@ -59,7 +60,9 @@ class ViewOrder extends ViewRecord
                 ->color('info')
                 ->action(function (): void {
                     $this->setOrderStatus('confirmed');
-                    Notification::make()->title('Заказ подтверждён')->success()->send();
+                    FilamentSweetAlert::flashSuccess('Заказ подтверждён');
+                    $url = OrderResource::getUrl('view', ['record' => $this->record]);
+                    $this->redirect($url, navigate: FilamentView::hasSpaMode($url));
                 }),
             Actions\Action::make('pack')
                 ->label('Собран')
@@ -67,8 +70,9 @@ class ViewOrder extends ViewRecord
                 ->action(function (): void {
                     $this->upsertShipmentStatus('packed');
                     $this->setOrderStatus('processing');
-
-                    Notification::make()->title('Заказ отмечен как собранный')->success()->send();
+                    FilamentSweetAlert::flashSuccess('Заказ отмечен как собранный');
+                    $url = OrderResource::getUrl('view', ['record' => $this->record]);
+                    $this->redirect($url, navigate: FilamentView::hasSpaMode($url));
                 }),
             Actions\Action::make('ship')
                 ->label('Отгрузить')
@@ -76,8 +80,9 @@ class ViewOrder extends ViewRecord
                 ->action(function (): void {
                     $this->upsertShipmentStatus('shipped', ['shipped_at' => now()]);
                     $this->setOrderStatus('shipped');
-
-                    Notification::make()->title('Заказ отгружен')->success()->send();
+                    FilamentSweetAlert::flashSuccess('Заказ отгружен');
+                    $url = OrderResource::getUrl('view', ['record' => $this->record]);
+                    $this->redirect($url, navigate: FilamentView::hasSpaMode($url));
                 }),
             Actions\Action::make('deliver')
                 ->label('Доставлен')
@@ -87,8 +92,9 @@ class ViewOrder extends ViewRecord
                         'shipped_at' => $this->record->latestShipment?->shipped_at ?? now(),
                     ]);
                     $this->setOrderStatus('delivered');
-
-                    Notification::make()->title('Заказ доставлен')->success()->send();
+                    FilamentSweetAlert::flashSuccess('Заказ доставлен');
+                    $url = OrderResource::getUrl('view', ['record' => $this->record]);
+                    $this->redirect($url, navigate: FilamentView::hasSpaMode($url));
                 }),
             Actions\Action::make('cancel')
                 ->label('Отменить')
@@ -97,8 +103,9 @@ class ViewOrder extends ViewRecord
                 ->action(function (): void {
                     $this->upsertShipmentStatus('cancelled');
                     $this->setOrderStatus('cancelled');
-
-                    Notification::make()->title('Заказ отменён')->success()->send();
+                    FilamentSweetAlert::flashSuccess('Заказ отменён');
+                    $url = OrderResource::getUrl('view', ['record' => $this->record]);
+                    $this->redirect($url, navigate: FilamentView::hasSpaMode($url));
                 }),
             Actions\EditAction::make(),
         ];

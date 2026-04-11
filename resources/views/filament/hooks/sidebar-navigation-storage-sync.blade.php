@@ -3,7 +3,7 @@
     (function () {
         try {
             var VERSION = '2-all-groups-collapsed-default';
-            var key = 'vsedetali_filament_collapsed_groups_storage_v';
+            var key = 'vsedetalki_ru_filament_collapsed_groups_storage_v';
             if (localStorage.getItem(key) !== VERSION) {
                 localStorage.removeItem('collapsedGroups');
                 localStorage.setItem(key, VERSION);

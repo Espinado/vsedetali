@@ -102,7 +102,7 @@ class CatalogProductImageDownloader
         try {
             $response = Http::timeout($timeout)
                 ->withHeaders([
-                    'User-Agent' => 'VseDetaliCatalogImport/1.0',
+                    'User-Agent' => 'vsedetalki.ru-catalog-import/1.0',
                     'Accept' => 'image/webp,image/jpeg,image/png,image/gif,*/*',
                 ])
                 ->withOptions(['allow_redirects' => true])

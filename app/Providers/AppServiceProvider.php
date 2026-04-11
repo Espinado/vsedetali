@@ -78,7 +78,7 @@ class AppServiceProvider extends ServiceProvider
         Schema::defaultStringLength(191);
 
         View::composer(['layouts.storefront', 'storefront.*'], function ($view): void {
-            $view->with('storeName', Setting::get('store_name', config('app.name')));
+            $view->with('storeName', Setting::storeDisplayName());
         });
 
         Paginator::defaultView('vendor.pagination.tailwind');

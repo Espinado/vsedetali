@@ -6,6 +6,7 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Schema;
+use Illuminate\Support\Str;
 
 class Setting extends Model
 {
@@ -30,6 +31,41 @@ class Setting extends Model
         } catch (\Throwable $e) {
             return $default;
         }
+    }
+
+    /**
+     * Название магазина для витрины (шапка, футер, SEO): домен vsedetalki.ru вместо устаревших вариантов из БД.
+     */
+    public static function storeDisplayName(): string
+    {
+        $fallback = trim((string) config('app.name')) ?: 'vsedetalki.ru';
+        $raw = static::get('store_name', null);
+        if ($raw === null || trim((string) $raw) === '') {
+            return $fallback;
+        }
+
+        $trimmed = trim((string) $raw);
+        if ($trimmed === 'vsedetalki.ru') {
+            return 'vsedetalki.ru';
+        }
+
+        $normalized = Str::lower($trimmed);
+
+        $legacy = [
+            'vsedetalki',
+            'vsedetali',
+            'vsedetali.ru',
+            'vse detali',
+            'vsē detaļi',
+        ];
+
+        foreach ($legacy as $legacyName) {
+            if ($normalized === Str::lower($legacyName)) {
+                return 'vsedetalki.ru';
+            }
+        }
+
+        return $trimmed;
     }
 
     public static function set(string $key, $value, string $group = 'general'): void

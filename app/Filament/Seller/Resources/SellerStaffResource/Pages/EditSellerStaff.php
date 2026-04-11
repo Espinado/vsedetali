@@ -3,10 +3,11 @@
 namespace App\Filament\Seller\Resources\SellerStaffResource\Pages;
 
 use App\Filament\Seller\Resources\SellerStaffResource;
+use App\Filament\Support\FilamentSweetAlert;
 use App\Services\SellerStaffInvitationService;
 use Filament\Actions\Action;
-use Filament\Notifications\Notification;
 use Filament\Resources\Pages\EditRecord;
+use Filament\Support\Facades\FilamentView;
 
 class EditSellerStaff extends EditRecord
 {
@@ -22,10 +23,9 @@ class EditSellerStaff extends EditRecord
                 ->visible(fn (): bool => ! $this->record->hasPasswordSet())
                 ->action(function (): void {
                     app(SellerStaffInvitationService::class)->sendInvitation($this->record);
-                    Notification::make()
-                        ->title('Письмо отправлено на '.$this->record->email)
-                        ->success()
-                        ->send();
+                    FilamentSweetAlert::flashSuccess('Письмо отправлено на '.$this->record->email);
+                    $url = SellerStaffResource::getUrl('edit', ['record' => $this->record]);
+                    $this->redirect($url, navigate: FilamentView::hasSpaMode($url));
                 }),
             ...parent::getHeaderActions(),
         ];
