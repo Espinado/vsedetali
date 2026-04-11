@@ -1,4 +1,21 @@
-<div class="w-full">
+<div class="relative w-full">
+    <div
+        wire:loading.delay.shortest
+        class="fixed inset-0 z-[200] bg-stone-900/20 backdrop-blur-[2px]"
+        role="status"
+        aria-live="polite"
+        aria-busy="true"
+    >
+        <div class="flex h-full w-full items-center justify-center p-4">
+            <div class="w-full max-w-xs rounded-2xl border border-orange-100/90 bg-white px-6 py-5 shadow-xl shadow-orange-950/10 sm:max-w-sm">
+                <div class="storefront-filter-loading-track">
+                    <div class="storefront-filter-loading-bar"></div>
+                </div>
+                <p class="mt-4 text-center text-sm font-medium text-stone-700">Загружаем подбор…</p>
+            </div>
+        </div>
+    </div>
+
     <fieldset class="mx-auto mb-5 max-w-5xl border-0 p-0">
         <legend class="mb-1.5 block w-full text-center text-xs font-medium text-stone-600 sm:text-left sm:text-[13px]">Поиск по номеру</legend>
         @livewire('storefront.header-search', ['variant' => 'hero'], key('storefront-home-search'))

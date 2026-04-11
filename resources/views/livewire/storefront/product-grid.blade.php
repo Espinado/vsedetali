@@ -1,4 +1,22 @@
-<div>
+<div class="relative">
+    {{-- Ожидание ответа сервера при смене фильтров, сортировки, поиска или страницы --}}
+    <div
+        wire:loading.delay.shortest
+        class="fixed inset-0 z-[200] bg-stone-900/20 backdrop-blur-[2px]"
+        role="status"
+        aria-live="polite"
+        aria-busy="true"
+    >
+        <div class="flex h-full w-full items-center justify-center p-4">
+            <div class="w-full max-w-xs rounded-2xl border border-orange-100/90 bg-white px-6 py-5 shadow-xl shadow-orange-950/10 sm:max-w-sm">
+                <div class="storefront-filter-loading-track">
+                    <div class="storefront-filter-loading-bar"></div>
+                </div>
+                <p class="mt-4 text-center text-sm font-medium text-stone-700">Подбираем товары…</p>
+            </div>
+        </div>
+    </div>
+
     <nav class="text-sm text-slate-500 mb-6 -mx-1 px-1 overflow-x-auto whitespace-nowrap sm:whitespace-normal sm:overflow-visible" aria-label="Навигация">
         <a href="{{ route('catalog') }}" class="font-medium text-slate-700 hover:text-slate-900">Каталог</a>
         @foreach($this->categoryBreadcrumbChain as $cat)

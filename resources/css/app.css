@@ -84,4 +84,23 @@
         @apply h-4 w-4 shrink-0 rounded border border-slate-400 text-orange-600;
         @apply focus:outline-none focus:ring-2 focus:ring-orange-500/40 focus:ring-offset-0;
     }
+
+    /* Полоса-«слайдер» при ожидании ответа Livewire (фильтры каталога / подбор на главной) */
+    .storefront-filter-loading-track {
+        @apply h-1.5 overflow-hidden rounded-full bg-orange-100;
+    }
+
+    .storefront-filter-loading-bar {
+        @apply h-full w-[40%] rounded-full bg-gradient-to-r from-orange-300 via-orange-500 to-orange-300;
+        animation: storefront-filter-slider 1.05s ease-in-out infinite;
+    }
+}
+
+@keyframes storefront-filter-slider {
+    0% {
+        transform: translateX(-120%);
+    }
+    100% {
+        transform: translateX(320%);
+    }
 }
