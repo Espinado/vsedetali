@@ -7,10 +7,25 @@ use Filament\Tables\Actions\Action as TableAction;
 use Filament\Tables\Actions\DeleteAction as TableDeleteAction;
 use Filament\Tables\Actions\DeleteBulkAction;
 use Illuminate\Database\Eloquent\Model;
-use Illuminate\Support\Js;
 
 final class FilamentSweetAlert
 {
+    /**
+     * Safe inside HTML double-quoted attributes (e.g. Filament x-on:click="...").
+     * JSON/Js::from double quotes would terminate the attribute early.
+     */
+    private static function jsSingleQuotedString(string $value): string
+    {
+        return "'".addcslashes($value, "\\'")."'";
+    }
+
+    private static function jsRecordKey(mixed $key): string
+    {
+        $s = (string) $key;
+
+        return ctype_digit($s) ? $s : self::jsSingleQuotedString($s);
+    }
+
     public static function mixinScript(): string
     {
         return <<<'JS'
@@ -40,9 +55,9 @@ final class FilamentSweetAlert
 
     public static function configureHeaderDelete(HeaderDeleteAction $action, string $title, ?string $html = null): void
     {
-        $titleJs = Js::from($title)->toHtml();
-        $htmlExpr = $html !== null ? Js::from($html)->toHtml() : 'null';
-        $confirmJs = Js::from('Удалить')->toHtml();
+        $titleJs = self::jsSingleQuotedString($title);
+        $htmlExpr = $html !== null ? self::jsSingleQuotedString($html) : 'null';
+        $confirmJs = self::jsSingleQuotedString('Удалить');
         $inner = self::coreOptions($titleJs, $htmlExpr, 'warning', $confirmJs);
 
         $action
@@ -54,9 +69,9 @@ final class FilamentSweetAlert
 
     public static function configureTableDelete(TableDeleteAction $action, string $title, ?string $html = null): void
     {
-        $titleJs = Js::from($title)->toHtml();
-        $htmlExpr = $html !== null ? Js::from($html)->toHtml() : 'null';
-        $confirmJs = Js::from('Удалить')->toHtml();
+        $titleJs = self::jsSingleQuotedString($title);
+        $htmlExpr = $html !== null ? self::jsSingleQuotedString($html) : 'null';
+        $confirmJs = self::jsSingleQuotedString('Удалить');
         $inner = self::coreOptions($titleJs, $htmlExpr, 'warning', $confirmJs);
 
         $action
@@ -64,7 +79,7 @@ final class FilamentSweetAlert
             ->successNotification(null)
             ->failureNotification(null)
             ->alpineClickHandler(function (Model $record) use ($inner): string {
-                $key = Js::from((string) $record->getKey())->toHtml();
+                $key = self::jsRecordKey($record->getKey());
 
                 return "Swal.fire({ {$inner} }).then((r) => { if (r.isConfirmed) \$wire.mountTableAction('delete', {$key}) })";
             });
@@ -72,9 +87,9 @@ final class FilamentSweetAlert
 
     public static function configureBulkDelete(DeleteBulkAction $action, string $title, string $countPrefix = 'Будет удалено записей:'): void
     {
-        $titleJs = Js::from($title)->toHtml();
-        $prefixJs = Js::from($countPrefix.' ')->toHtml();
-        $confirmJs = Js::from('Удалить')->toHtml();
+        $titleJs = self::jsSingleQuotedString($title);
+        $prefixJs = self::jsSingleQuotedString($countPrefix.' ');
+        $confirmJs = self::jsSingleQuotedString('Удалить');
         $htmlExpr = "({$prefixJs} + '<strong>' + selectedRecords.length + '</strong>')";
         $inner = self::coreOptions($titleJs, $htmlExpr, 'warning', $confirmJs);
 
@@ -93,17 +108,18 @@ final class FilamentSweetAlert
         string $icon = 'question',
         string $confirmLabel = 'Подтвердить',
     ): void {
-        $titleJs = Js::from($title)->toHtml();
-        $htmlExpr = $html !== null ? Js::from($html)->toHtml() : 'null';
-        $confirmJs = Js::from($confirmLabel)->toHtml();
+        $titleJs = self::jsSingleQuotedString($title);
+        $htmlExpr = $html !== null ? self::jsSingleQuotedString($html) : 'null';
+        $confirmJs = self::jsSingleQuotedString($confirmLabel);
         $inner = self::coreOptions($titleJs, $htmlExpr, $icon, $confirmJs);
 
         $action
             ->modal(false)
             ->alpineClickHandler(function (Model $record) use ($inner, $livewireActionName): string {
-                $key = Js::from((string) $record->getKey())->toHtml();
+                $key = self::jsRecordKey($record->getKey());
+                $actionJs = self::jsSingleQuotedString($livewireActionName);
 
-                return "Swal.fire({ {$inner} }).then((r) => { if (r.isConfirmed) \$wire.mountTableAction('{$livewireActionName}', {$key}) })";
+                return "Swal.fire({ {$inner} }).then((r) => { if (r.isConfirmed) \$wire.mountTableAction({$actionJs}, {$key}) })";
             });
     }
 }

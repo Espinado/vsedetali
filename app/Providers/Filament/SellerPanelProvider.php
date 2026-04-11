@@ -57,7 +57,7 @@ class SellerPanelProvider extends PanelProvider
                 Authenticate::class,
             ])
             ->renderHook(
-                PanelsRenderHook::BODY_START,
+                PanelsRenderHook::SCRIPTS_AFTER,
                 fn (): string => view('filament.hooks.sweetalert-assets')->render()
             );
     }
