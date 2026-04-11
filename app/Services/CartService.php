@@ -20,11 +20,7 @@ class CartService
             return;
         }
 
-        $guestCart = Cart::query()
-            ->where('session_id', $guestSessionId)
-            ->whereNull('user_id')
-            ->latest('id')
-            ->first();
+        $guestCart = $this->findGuestCart($guestSessionId);
 
         if (! $guestCart || $guestCart->cartItems()->doesntExist()) {
             return;
@@ -32,7 +28,7 @@ class CartService
 
         $guestCart->load('cartItems');
 
-        $userCart = Cart::query()->where('user_id', $user->id)->latest('id')->first();
+        $userCart = $this->findUserCart($user->id);
 
         if (! $userCart) {
             $guestCart->update(['user_id' => $user->id, 'session_id' => null]);
@@ -59,18 +55,65 @@ class CartService
         $guestCart->delete();
     }
 
+    /**
+     * Среди нескольких корзин одного пользователя берём сначала ту, где есть позиции
+     * (иначе latest() даёт последнюю созданную — часто пустую после merge/дубликатов).
+     */
+    protected function findUserCart(int $userId): ?Cart
+    {
+        $withItems = Cart::query()
+            ->where('user_id', $userId)
+            ->whereHas('cartItems')
+            ->latest('id')
+            ->first();
+
+        if ($withItems) {
+            return $withItems;
+        }
+
+        return Cart::query()->where('user_id', $userId)->latest('id')->first();
+    }
+
+    /**
+     * То же для гостевой корзины по session_id.
+     */
+    protected function findGuestCart(string $sessionId): ?Cart
+    {
+        if ($sessionId === '') {
+            return null;
+        }
+
+        $withItems = Cart::query()
+            ->where('session_id', $sessionId)
+            ->whereNull('user_id')
+            ->whereHas('cartItems')
+            ->latest('id')
+            ->first();
+
+        if ($withItems) {
+            return $withItems;
+        }
+
+        return Cart::query()
+            ->where('session_id', $sessionId)
+            ->whereNull('user_id')
+            ->latest('id')
+            ->first();
+    }
+
     public function getOrCreateCart(): Cart
     {
         if (Auth::check()) {
-            $cart = Cart::where('user_id', Auth::id())->latest()->first();
+            $cart = $this->findUserCart((int) Auth::id());
             if ($cart) {
                 return $cart;
             }
+
             return Cart::create(['user_id' => Auth::id()]);
         }
 
         $sessionId = session()->getId();
-        $cart = Cart::where('session_id', $sessionId)->latest()->first();
+        $cart = $this->findGuestCart($sessionId);
         if ($cart) {
             return $cart;
         }
