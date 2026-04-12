@@ -7,6 +7,7 @@ use App\Filament\Resources\SellerResource\RelationManagers\MarketplaceSellerProd
 use App\Filament\Resources\SellerResource\RelationManagers\WarehousesRelationManager;
 use App\Models\Seller;
 use App\Models\Staff;
+use Filament\Facades\Filament;
 use Filament\Forms;
 use Filament\Forms\Form;
 use Filament\Navigation\NavigationItem;
@@ -116,7 +117,7 @@ class SellerResource extends Resource
                             ->nullable(),
                     ]),
                 Forms\Components\Section::make('Администратор продавца (первый вход по приглашению)')
-                    ->description('На email уйдёт ссылка для установки пароля. Вход в кабинет: '.url('/seller').'. После создания автоматически создаётся склад продавца «Основной склад». Дополнительные склады и товары на площадке — во вкладках карточки продавца (после сохранения).')
+                    ->description('На email уйдёт ссылка для установки пароля. Вход в кабинет: '.Filament::getPanel('seller')->getUrl().'. После создания автоматически создаётся склад продавца «Основной склад». Дополнительные склады и товары на площадке — во вкладках карточки продавца (после сохранения).')
                     ->visibleOn('create')
                     ->schema([
                         Forms\Components\TextInput::make('admin_first_name')

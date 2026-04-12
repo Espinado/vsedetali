@@ -3,6 +3,7 @@
 namespace App\Providers\Filament;
 
 use App\Filament\Pages\Dashboard;
+use App\Http\Middleware\BindPanelSessionCookie;
 use App\Models\ChatConversation;
 use Filament\Http\Middleware\Authenticate;
 use Filament\Http\Middleware\DisableBladeIconComponents;
@@ -25,10 +26,11 @@ class AdminPanelProvider extends PanelProvider
 {
     public function panel(Panel $panel): Panel
     {
-        return $panel
+        $adminDomain = config('panels.admin.domain');
+
+        $panel = $panel
             ->default()
             ->id('admin')
-            ->path('admin')
             ->authGuard('staff')
             ->authPasswordBroker('staff')
             ->brandName(config('app.name'))
@@ -80,8 +82,17 @@ class AdminPanelProvider extends PanelProvider
             ->discoverWidgets(in: app_path('Filament/Widgets'), for: 'App\\Filament\\Widgets')
             ->widgets([
                 Widgets\AccountWidget::class,
-            ])
+            ]);
+
+        if (filled($adminDomain)) {
+            $panel = $panel->domain($adminDomain)->path('');
+        } else {
+            $panel = $panel->path((string) config('panels.admin.path'));
+        }
+
+        return $panel
             ->middleware([
+                BindPanelSessionCookie::class,
                 EncryptCookies::class,
                 AddQueuedCookiesToResponse::class,
                 StartSession::class,
@@ -105,7 +116,8 @@ class AdminPanelProvider extends PanelProvider
             )
             ->renderHook(
                 PanelsRenderHook::HEAD_END,
-                fn (): string => view('filament.hooks.sidebar-navigation-storage-sync')->render()
+                fn (): string => view('partials.pwa-head')->render()
+                    .view('filament.hooks.sidebar-navigation-storage-sync')->render()
             )
             ->renderHook(
                 'panels::styles.after',
@@ -119,6 +131,10 @@ class AdminPanelProvider extends PanelProvider
             ->renderHook(
                 'panels::body.end',
                 fn (): string => view('filament.hooks.admin-chat')->render()
+            )
+            ->renderHook(
+                'panels::body.end',
+                fn (): string => view('partials.pwa-install-banner')->render()
             );
     }
 }

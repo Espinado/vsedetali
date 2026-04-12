@@ -5,6 +5,7 @@ namespace App\Providers\Filament;
 use App\Filament\Seller\Pages\Auth\Login as SellerPanelLogin;
 use App\Filament\Seller\Pages\Dashboard;
 use App\Filament\Seller\Widgets\SellerOrdersSummaryWidget;
+use App\Http\Middleware\BindPanelSessionCookie;
 use App\Http\Middleware\RedirectIfSellerBlockedFromPanel;
 use Filament\Http\Middleware\Authenticate;
 use Filament\Http\Middleware\DisableBladeIconComponents;
@@ -26,9 +27,10 @@ class SellerPanelProvider extends PanelProvider
 {
     public function panel(Panel $panel): Panel
     {
-        return $panel
+        $sellerDomain = config('panels.seller.domain');
+
+        $panel = $panel
             ->id('seller')
-            ->path('seller')
             ->authGuard('seller_staff')
             ->authPasswordBroker('seller_staff')
             ->brandName(config('app.name').' — продавец')
@@ -43,8 +45,17 @@ class SellerPanelProvider extends PanelProvider
             ->widgets([
                 SellerOrdersSummaryWidget::class,
                 Widgets\AccountWidget::class,
-            ])
+            ]);
+
+        if (filled($sellerDomain)) {
+            $panel = $panel->domain($sellerDomain)->path('');
+        } else {
+            $panel = $panel->path((string) config('panels.seller.path'));
+        }
+
+        return $panel
             ->middleware([
+                BindPanelSessionCookie::class,
                 EncryptCookies::class,
                 AddQueuedCookiesToResponse::class,
                 StartSession::class,
@@ -64,8 +75,16 @@ class SellerPanelProvider extends PanelProvider
                 fn (): string => view('filament.hooks.sweetalert-assets')->render()
             )
             ->renderHook(
+                PanelsRenderHook::HEAD_END,
+                fn (): string => view('partials.pwa-head')->render()
+            )
+            ->renderHook(
                 'panels::styles.after',
                 fn (): string => view('filament.hooks.panel-table-layout-fix')->render()
+            )
+            ->renderHook(
+                'panels::body.end',
+                fn (): string => view('partials.pwa-install-banner')->render()
             );
     }
 }

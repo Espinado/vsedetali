@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use Filament\Facades\Filament;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
@@ -11,12 +12,12 @@ class AdminAccessTest extends TestCase
 
     public function test_guest_is_redirected_to_admin_login(): void
     {
-        $this->get('/admin')
-            ->assertRedirect('/admin/login');
+        $this->get(Filament::getPanel('admin')->getUrl())
+            ->assertRedirect(route('filament.admin.auth.login'));
     }
 
     public function test_guest_can_open_admin_login_page(): void
     {
-        $this->get('/admin/login')->assertOk();
+        $this->get(route('filament.admin.auth.login'))->assertOk();
     }
 }

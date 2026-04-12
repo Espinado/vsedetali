@@ -5,10 +5,11 @@ namespace Database\Seeders;
 use App\Models\Seller;
 use App\Models\SellerStaff;
 use App\Models\Warehouse;
+use Filament\Facades\Filament;
 use Illuminate\Database\Seeder;
 
 /**
- * Тестовый продавец для локальной проверки кабинета /seller (без письма с приглашением).
+ * Тестовый продавец для локальной проверки кабинета продавца (без письма с приглашением).
  */
 class TestSellerSeeder extends Seeder
 {
@@ -55,6 +56,6 @@ class TestSellerSeeder extends Seeder
             $staff->assignRole('admin');
         }
 
-        $this->command?->info('Тестовый продавец: '.$seller->name.' (slug: test-seller). Вход /seller — '.$email.' / password');
+        $this->command?->info('Тестовый продавец: '.$seller->name.' (slug: test-seller). Вход: '.Filament::getPanel('seller')->getUrl().' — '.$email.' / password');
     }
 }

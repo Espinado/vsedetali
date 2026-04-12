@@ -4,12 +4,13 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="csrf-token" content="{{ csrf_token() }}">
+    @include('partials.pwa-head')
     @include('layouts.partials.seo-head')
     @stack('head')
     @vite(['resources/css/app.css', 'resources/js/app.js'])
     @livewireStyles
 </head>
-<body class="min-h-screen flex flex-col min-w-0 bg-gradient-to-b from-orange-50/90 via-amber-50/40 to-stone-100 text-stone-900">
+<body class="min-h-screen flex flex-col min-w-0 bg-gradient-to-b from-orange-50/90 via-amber-50/40 to-stone-100 text-stone-900" data-pwa-sw="{{ url('/sw.js') }}">
     <header class="sticky top-0 z-50 border-b border-orange-950/30 bg-gradient-to-r from-stone-950 via-stone-900 to-stone-800 pt-[env(safe-area-inset-top)] shadow-md shadow-black/25">
         <div class="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8">
             <div class="flex flex-col gap-3 py-3 sm:flex-row sm:items-center sm:justify-between sm:py-4">
@@ -75,5 +76,6 @@
     {{-- @livewire('storefront.store-chat-widget') --}}
     @livewire('storefront.cart-drawer')
     @livewireScripts
+    @include('partials.pwa-install-banner')
 </body>
 </html>

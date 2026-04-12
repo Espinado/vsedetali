@@ -18,6 +18,9 @@
         </include>
     </source>
     <php>
+        <env name="APP_URL" value="https://vsedetali.test"/>
+        <env name="ADMIN_PANEL_DOMAIN" value="admin.vsedetali.test"/>
+        <env name="SELLER_PANEL_DOMAIN" value="seller.vsedetali.test"/>
         <env name="APP_ENV" value="testing"/>
         <env name="APP_MAINTENANCE_DRIVER" value="file"/>
         <env name="BCRYPT_ROUNDS" value="4"/>

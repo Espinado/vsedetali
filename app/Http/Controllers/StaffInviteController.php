@@ -36,7 +36,7 @@ class StaffInviteController extends Controller
     public function update(Request $request, string $token): RedirectResponse
     {
         if (auth('staff')->check()) {
-            return redirect('/admin');
+            return redirect()->to(Filament::getPanel('admin')->getUrl());
         }
 
         $staff = $this->invitationService->findValidStaffByToken($token);
@@ -52,6 +52,6 @@ class StaffInviteController extends Controller
 
         auth('staff')->login($staff);
 
-        return redirect('/admin');
+        return redirect()->to(Filament::getPanel('admin')->getUrl());
     }
 }
