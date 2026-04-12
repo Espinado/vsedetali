@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\AuthController;
+use App\Http\Middleware\RedirectPanelSubdomainsFromStorefront;
 use App\Http\Controllers\PwaManifestController;
 use App\Http\Controllers\PwaServiceWorkerController;
 use App\Http\Controllers\SellerStaffInviteController;
@@ -13,6 +14,7 @@ use App\Models\Page;
 use App\Models\Product;
 use App\Models\Setting;
 use App\Support\Seo;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Route;
 
 // GET в адресной строке не передаёт socket_id/channel_name — Laravel отдаёт 403. Реальный запрос — только POST из Echo.
@@ -35,8 +37,18 @@ if (app()->isLocal()) {
     })->name('design.product-cards');
 }
 
-$storefrontHost = parse_url((string) config('app.url'), PHP_URL_HOST);
+$appUrlRaw = trim((string) config('app.url'));
+$appUrlNormalized = (str_starts_with($appUrlRaw, 'http://') || str_starts_with($appUrlRaw, 'https://'))
+    ? $appUrlRaw
+    : 'https://'.$appUrlRaw;
+$parsedStorefrontHost = parse_url($appUrlNormalized, PHP_URL_HOST);
+$parsedStorefrontHost = is_string($parsedStorefrontHost) ? $parsedStorefrontHost : '';
+$storefrontHost = trim((string) config('panels.storefront_domain')) ?: $parsedStorefrontHost;
 $panelsUseDedicatedHosts = filled(config('panels.admin.domain')) || filled(config('panels.seller.domain'));
+
+if ($panelsUseDedicatedHosts && $storefrontHost === '') {
+    Log::warning('Задайте APP_URL=https://… или STOREFRONT_DOMAIN=vsedetalki.ru, иначе витрину нельзя привязать к одному хосту.');
+}
 
 $inviteThrottle = ['throttle:12,1'];
 
@@ -172,10 +184,13 @@ $registerStorefrontRoutes = function () use ($panelsUseDedicatedHosts): void {
     });
 };
 
-if ($panelsUseDedicatedHosts && is_string($storefrontHost) && $storefrontHost !== '') {
+if ($panelsUseDedicatedHosts && $storefrontHost !== '') {
     Route::domain($storefrontHost)->group($registerStorefrontRoutes);
-} else {
+} elseif (! $panelsUseDedicatedHosts) {
     $registerStorefrontRoutes();
+} else {
+    Log::error('Витрина: не удалось взять хост из APP_URL — проверьте APP_URL=https://vsedetalki.ru или STOREFRONT_DOMAIN; php artisan config:clear. Временно панели редиректятся с / на /login.');
+    Route::middleware([RedirectPanelSubdomainsFromStorefront::class])->group($registerStorefrontRoutes);
 }
 
 Route::get('/manifest.webmanifest', PwaManifestController::class)->name('pwa.manifest');

@@ -1,5 +1,7 @@
 <?php
 
+use App\Support\PanelDomain;
+
 return [
 
     /*
@@ -14,14 +16,19 @@ return [
     */
 
     'admin' => [
-        'domain' => env('ADMIN_PANEL_DOMAIN'),
+        'domain' => PanelDomain::normalizeEnv('ADMIN_PANEL_DOMAIN'),
         'path' => env('ADMIN_PANEL_PATH', 'admin'),
     ],
 
     'seller' => [
-        'domain' => env('SELLER_PANEL_DOMAIN'),
+        'domain' => PanelDomain::normalizeEnv('SELLER_PANEL_DOMAIN'),
         'path' => env('SELLER_PANEL_PATH', 'seller'),
     ],
+
+    /*
+    | Явный хост витрины (если из APP_URL хост не получается). Должен совпадать с тем, что в браузере у покупателей.
+    */
+    'storefront_domain' => PanelDomain::normalizeEnv('STOREFRONT_DOMAIN'),
 
     'session_cookies' => [
         'admin' => env('ADMIN_SESSION_COOKIE', 'vsedetali-admin-session'),

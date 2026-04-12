@@ -7,6 +7,7 @@ use App\Models\Seller;
 use App\Models\Setting;
 use App\Models\Staff;
 use App\Models\User;
+use App\Console\Commands\DiagnosePanelsCommand;
 use App\Observers\SellerObserver;
 use App\Observers\UserObserver;
 use Illuminate\Broadcasting\BroadcastManager;
@@ -66,6 +67,10 @@ class AppServiceProvider extends ServiceProvider
      */
     public function boot(): void
     {
+        $this->commands([
+            DiagnosePanelsCommand::class,
+        ]);
+
         User::observe(UserObserver::class);
         Seller::observe(SellerObserver::class);
 
