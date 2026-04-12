@@ -9,7 +9,6 @@ use App\Models\ProductImage;
 use App\Support\ProductCatalogSlug;
 use App\Support\SellerListingVehicleCompatibilities;
 use Filament\Resources\Pages\CreateRecord;
-use Illuminate\Support\Collection;
 use Illuminate\Validation\ValidationException;
 
 class CreateProduct extends CreateRecord
@@ -18,8 +17,10 @@ class CreateProduct extends CreateRecord
 
     protected static bool $canCreateAnother = false;
 
-    /** @var Collection<int, int>|null */
-    protected ?Collection $pendingVehicleIds = null;
+    /**
+     * @var array<int, array{compat_year_from: ?int, compat_year_to: ?int}>|null
+     */
+    protected ?array $pendingVehicleSync = null;
 
     /** @var list<string>|null */
     protected ?array $pendingGalleryPaths = null;
@@ -43,7 +44,7 @@ class CreateProduct extends CreateRecord
         $rows = SellerListingVehicleCompatibilities::normalizeRepeaterRows(
             $state['vehicle_compatibilities'] ?? null
         );
-        $this->pendingVehicleIds = SellerListingVehicleCompatibilities::collectVehicleIds($rows);
+        $this->pendingVehicleSync = SellerListingVehicleCompatibilities::collectVehiclePivotSync($rows);
 
         $gallery = SellerListingVehicleCompatibilities::normalizeListingImageUpload($state['product_gallery'] ?? null);
         if ($gallery === []) {
@@ -56,9 +57,9 @@ class CreateProduct extends CreateRecord
 
     protected function afterCreate(): void
     {
-        if ($this->pendingVehicleIds !== null) {
-            $this->record->syncVehiclesByIdsPreservingOem($this->pendingVehicleIds->all());
-            $this->pendingVehicleIds = null;
+        if ($this->pendingVehicleSync !== null) {
+            $this->record->syncVehiclesPreservingOemAndCompat($this->pendingVehicleSync);
+            $this->pendingVehicleSync = null;
         }
         if ($this->pendingGalleryPaths !== null) {
             foreach ($this->pendingGalleryPaths as $i => $path) {

@@ -8,6 +8,40 @@ use Illuminate\Validation\ValidationException;
 
 final class SellerListingVehicleCompatibilities
 {
+    /** Макс. разница «последний год − первый год» в одном диапазоне (включительно лет на 1 больше). */
+    private const MANUAL_YEAR_RANGE_MAX_DIFF = 60;
+
+    /** Макс. число различных лет после разворота диапазонов в одной строке ручного ввода. */
+    private const MANUAL_YEAR_LIST_MAX_DISTINCT = 100;
+
+    /**
+     * Подсказка у поля ручного ввода годов (админка / кабинет продавца).
+     */
+    public static function freeformCompatibilityYearsFieldHint(): string
+    {
+        return 'Ввод только календарных годов (1900–2100). Один год — четыре цифры (2018). '
+            .'Несколько лет — через запятую, пробел или точку с запятой (2018, 2019, 2020). '
+            .'Диапазон — два четырёхзначных года через дефис, длинное тире или минус Unicode (2015-2020, 2015–2020); пробелы вокруг тире допускаются. '
+            .'Поколение кузова (F30, Mk7 и т.п.) сюда не вводите — оно задаётся в справочнике «Автомобили»; если показан блок «Записи из справочника», выберите там нужную строку. '
+            .'Буквы, слэши, скобки и прочие символы недопустимы; проверка при сохранении строгая.';
+    }
+
+    /**
+     * Нормализация строки ручного ввода: неразрывный пробел, табы, пробелы вокруг тире в диапазоне.
+     */
+    private static function normalizeManualYearsFreeformString(string $trimmed): string
+    {
+        $s = str_replace(["\xC2\xA0", "\t", "\r", "\n"], [' ', ' ', ' ', ' '], $trimmed);
+        $s = preg_replace_callback(
+            '/\d{4}\s*[-–\x{2014}\x{2212}]\s*\d{4}/u',
+            static fn (array $m): string => preg_replace('/\s+/u', '', $m[0]),
+            $s
+        ) ?? $s;
+        $s = trim(preg_replace('/ +/u', ' ', $s) ?? '');
+
+        return $s;
+    }
+
     /**
      * @return array<int>
      */
@@ -28,11 +62,12 @@ final class SellerListingVehicleCompatibilities
             return array_values(array_unique($out));
         }
         if (is_string($raw)) {
-            $parts = preg_split('/[\s,;]+/u', trim($raw), -1, PREG_SPLIT_NO_EMPTY);
+            $normalized = self::normalizeManualYearsFreeformString(trim($raw));
+            $parts = preg_split('/[\s,;]+/u', $normalized, -1, PREG_SPLIT_NO_EMPTY);
             $out = [];
             foreach ($parts as $p) {
                 $p = trim($p);
-                if (preg_match('/^(\d{4})\s*[-–\x{2014}]\s*(\d{4})$/u', $p, $m)) {
+                if (preg_match('/^(\d{4})\s*[-–\x{2014}\x{2212}]\s*(\d{4})$/u', $p, $m)) {
                     $a = (int) $m[1];
                     $b = (int) $m[2];
                     if ($a > $b) {
@@ -72,18 +107,37 @@ final class SellerListingVehicleCompatibilities
         }
 
         $path = "vehicle_compatibilities.{$rowIndex}.compatibility_years";
-        $parts = preg_split('/[\s,;]+/u', $trimmed, -1, PREG_SPLIT_NO_EMPTY);
+        $normalized = self::normalizeManualYearsFreeformString($trimmed);
+        if ($normalized === '') {
+            return;
+        }
+
+        if (preg_match('/[^\d\s,;\-–\x{2014}\x{2212}]/u', $normalized)) {
+            throw ValidationException::withMessages([
+                $path => 'Допустимы только цифры, пробел, запятая, «;» и тире между двумя годами. Поколение (F30, Mk7 и т.д.) вводите не здесь — см. подсказку под полем.',
+            ]);
+        }
+
+        $parts = preg_split('/[\s,;]+/u', $normalized, -1, PREG_SPLIT_NO_EMPTY);
         foreach ($parts as $p) {
             $p = trim($p);
             if ($p === '') {
                 continue;
             }
-            if (preg_match('/^(\d{4})\s*[-–\x{2014}]\s*(\d{4})$/u', $p, $m)) {
+            if (preg_match('/^(\d{4})\s*[-–\x{2014}\x{2212}]\s*(\d{4})$/u', $p, $m)) {
                 $a = (int) $m[1];
                 $b = (int) $m[2];
+                if ($a > $b) {
+                    [$a, $b] = [$b, $a];
+                }
                 if ($a < 1900 || $a > 2100 || $b < 1900 || $b > 2100) {
                     throw ValidationException::withMessages([
                         $path => 'Год в «'.$p.'» вне допустимого диапазона 1900–2100.',
+                    ]);
+                }
+                if ($b - $a > self::MANUAL_YEAR_RANGE_MAX_DIFF) {
+                    throw ValidationException::withMessages([
+                        $path => 'Слишком широкий диапазон «'.$p.'». Проверьте годы или разбейте на несколько диапазонов.',
                     ]);
                 }
 
@@ -155,6 +209,11 @@ final class SellerListingVehicleCompatibilities
             $make = isset($row['vehicle_make']) ? trim((string) $row['vehicle_make']) : '';
             $model = isset($row['vehicle_model']) ? trim((string) $row['vehicle_model']) : '';
             $parsedYears = self::parseYears($rawYears);
+            if (is_string($rawYears) && trim($rawYears) !== '' && count($parsedYears) > self::MANUAL_YEAR_LIST_MAX_DISTINCT) {
+                throw ValidationException::withMessages([
+                    "vehicle_compatibilities.{$index}.compatibility_years" => 'Слишком много лет в одной строке. Сократите диапазоны или разбейте совместимость на несколько строк (марка/модель).',
+                ]);
+            }
             if ($parsedYears !== [] && $make !== '' && $model !== '') {
                 $allowed = Vehicle::yearAllowedIntsForCompatibilityPicker($make, $model);
                 foreach ($parsedYears as $y) {
@@ -166,11 +225,16 @@ final class SellerListingVehicleCompatibilities
                 }
             }
 
+            $pickedIds = self::parseVehicleRowIds($row['vehicle_row_ids'] ?? null);
+            if (Vehicle::compatibilityPickerRowsWithDefinedYears($make, $model)->isEmpty()) {
+                $pickedIds = [];
+            }
+
             $normalized[] = [
                 'vehicle_make' => $make,
                 'vehicle_model' => $model,
                 'compatibility_years' => $parsedYears,
-                'vehicle_row_ids' => self::parseVehicleRowIds($row['vehicle_row_ids'] ?? null),
+                'vehicle_row_ids' => $pickedIds,
             ];
         }
 
@@ -201,7 +265,11 @@ final class SellerListingVehicleCompatibilities
         foreach ($rows as $index => $row) {
             $years = $row['compatibility_years'] ?? [];
             $picks = $row['vehicle_row_ids'] ?? [];
-            if ($years === [] && $picks === []) {
+            $make = $row['vehicle_make'] ?? '';
+            $model = $row['vehicle_model'] ?? '';
+            $picksAllowed = Vehicle::compatibilityPickerRowsWithDefinedYears($make, $model)->isNotEmpty();
+            $effectivePicks = $picksAllowed ? $picks : [];
+            if ($years === [] && $effectivePicks === []) {
                 throw ValidationException::withMessages([
                     "vehicle_compatibilities.{$index}.compatibility_years" => 'Укажите годы выпуска или выберите записи из справочника.',
                     "vehicle_compatibilities.{$index}.vehicle_row_ids" => 'Укажите годы выпуска или выберите записи из справочника.',
@@ -212,9 +280,9 @@ final class SellerListingVehicleCompatibilities
 
     /**
      * @param  list<array{vehicle_make: string, vehicle_model: string, compatibility_years: array<int>, vehicle_row_ids: array<int>}>  $rows
-     * @return Collection<int, int>
+     * @return array<int, array{compat_year_from: ?int, compat_year_to: ?int}>
      */
-    public static function collectVehicleIds(array $rows): Collection
+    public static function collectVehiclePivotSync(array $rows): array
     {
         if ($rows === []) {
             throw ValidationException::withMessages([
@@ -222,7 +290,25 @@ final class SellerListingVehicleCompatibilities
             ]);
         }
 
-        $vehicleIds = collect();
+        $allIds = [];
+        /** @var array<int, 'full'|list<int>> $constraints */
+        $constraints = [];
+
+        $mergeFull = function (int $id) use (&$constraints): void {
+            $constraints[$id] = 'full';
+        };
+
+        $mergeYears = function (int $id, array $subset) use (&$constraints): void {
+            if ($subset === []) {
+                return;
+            }
+            if (($constraints[$id] ?? null) === 'full') {
+                return;
+            }
+            $prev = $constraints[$id] ?? [];
+            $constraints[$id] = array_values(array_unique(array_merge($prev, $subset)));
+        };
+
         foreach ($rows as $index => $row) {
             $make = $row['vehicle_make'];
             $model = $row['vehicle_model'];
@@ -237,6 +323,11 @@ final class SellerListingVehicleCompatibilities
                 ]);
             }
 
+            $catalogOpts = Vehicle::yearOptionsForMakeAndModel($make, $model);
+            if (Vehicle::compatibilityPickerRowsWithDefinedYears($make, $model)->isEmpty()) {
+                $pickedIds = [];
+            }
+
             if ($years === [] && $pickedIds === []) {
                 throw ValidationException::withMessages([
                     $pathYears => 'Укажите годы выпуска или выберите записи из справочника.',
@@ -244,7 +335,14 @@ final class SellerListingVehicleCompatibilities
                 ]);
             }
 
+            if ($pickedIds !== [] && $catalogOpts !== [] && $years === []) {
+                throw ValidationException::withMessages([
+                    $pathYears => 'Выбраны записи из справочника и в каталоге для этой пары заданы годы — укажите годы применимости (список ниже).',
+                ]);
+            }
+
             $idsForRow = collect();
+            $picked = collect();
 
             if ($pickedIds !== []) {
                 $picked = Vehicle::query()->whereIn('id', $pickedIds)->get()->keyBy('id');
@@ -263,7 +361,7 @@ final class SellerListingVehicleCompatibilities
                         ]);
                     }
                 }
-                $idsForRow = $idsForRow->merge(collect($pickedIds));
+                $idsForRow = $idsForRow->merge($pickedIds);
             }
 
             if ($years !== []) {
@@ -285,17 +383,91 @@ final class SellerListingVehicleCompatibilities
                 $idsForRow = $idsForRow->merge($fromYears);
             }
 
-            $vehicleIds = $vehicleIds->merge($idsForRow->unique()->values());
+            foreach ($idsForRow->unique()->values() as $vid) {
+                $allIds[(int) $vid] = true;
+            }
+
+            foreach ($idsForRow->unique()->values() as $vid) {
+                $vid = (int) $vid;
+                $v = $picked->get($vid) ?? Vehicle::query()->find($vid);
+                if ($v === null) {
+                    continue;
+                }
+
+                if ($years === []) {
+                    $mergeFull($vid);
+
+                    continue;
+                }
+
+                $subset = $v->intersectYearListWithBounds($years);
+                if ($subset === []) {
+                    throw ValidationException::withMessages([
+                        $pathYears => 'Указанные годы не пересекаются с записью «'.$v->adminCompatibilityPickerLabel().'».',
+                    ]);
+                }
+                $mergeYears($vid, $subset);
+            }
         }
 
-        $vehicleIds = $vehicleIds->unique()->values();
-        if ($vehicleIds->isEmpty()) {
+        $sync = [];
+        foreach (array_keys($allIds) as $id) {
+            $id = (int) $id;
+            $c = $constraints[$id] ?? null;
+            if ($c === 'full' || $c === null) {
+                $sync[$id] = ['compat_year_from' => null, 'compat_year_to' => null];
+            } else {
+                /** @var list<int> $c */
+                $sync[$id] = [
+                    'compat_year_from' => min($c),
+                    'compat_year_to' => max($c),
+                ];
+            }
+        }
+
+        if ($sync === []) {
             throw ValidationException::withMessages([
                 'vehicle_compatibilities' => 'Не удалось сопоставить ни одну строку совместимости со справочником авто.',
             ]);
         }
 
-        return $vehicleIds;
+        return $sync;
+    }
+
+    /**
+     * @param  list<array{vehicle_make: string, vehicle_model: string, compatibility_years: array<int>, vehicle_row_ids: array<int>}>  $rows
+     * @return Collection<int, int>
+     */
+    public static function collectVehicleIds(array $rows): Collection
+    {
+        return collect(array_keys(self::collectVehiclePivotSync($rows)))->values();
+    }
+
+    /**
+     * Значение полей «годы» в repeater при редактировании (с учётом pivot).
+     *
+     * @param  \Illuminate\Database\Eloquent\Model|\stdClass|object|null  $pivot
+     */
+    public static function formStateForVehicleCompatibilityYears(Vehicle $vehicle, mixed $pivot): array|string|null
+    {
+        $cf = data_get($pivot, 'compat_year_from');
+        $ct = data_get($pivot, 'compat_year_to');
+        if ($cf !== null && $cf !== '' && $ct !== null && $ct !== '') {
+            $cf = (int) $cf;
+            $ct = (int) $ct;
+            if ($cf > $ct) {
+                [$cf, $ct] = [$ct, $cf];
+            }
+            $opts = Vehicle::yearOptionsForMakeAndModel($vehicle->make, $vehicle->model);
+            $range = range($cf, $ct);
+            if ($opts !== []) {
+                return array_values(array_filter($range, static fn (int $y): bool => isset($opts[$y])));
+            }
+
+            return implode(', ', $range);
+        }
+
+        return $vehicle->compatibilityYearsFormState();
     }
 
     /**

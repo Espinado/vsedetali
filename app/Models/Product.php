@@ -67,7 +67,7 @@ class Product extends Model
     public function vehicles(): BelongsToMany
     {
         return $this->belongsToMany(Vehicle::class, 'product_vehicle')
-            ->withPivot('oem_number')
+            ->withPivot(['oem_number', 'compat_year_from', 'compat_year_to'])
             ->withTimestamps();
     }
 
@@ -204,13 +204,13 @@ class Product extends Model
                 if ($tail === null || $tail === '') {
                     continue;
                 }
-                $out[] = VehicleLabelNormalizer::title(trim($make.' '.$tail)).$v->storefrontYearRangeSuffix();
+                $out[] = VehicleLabelNormalizer::title(trim($make.' '.$tail)).$this->storefrontYearSuffixForLinkedVehicle($v);
             } else {
                 $base = trim($make.' '.$model);
                 if ($v->generation !== null && trim((string) $v->generation) !== '') {
                     $base = trim($base.' '.trim((string) $v->generation));
                 }
-                $out[] = $base.$v->storefrontYearRangeSuffix();
+                $out[] = $base.$this->storefrontYearSuffixForLinkedVehicle($v);
             }
         }
 
@@ -257,7 +257,7 @@ class Product extends Model
             }
         }
 
-        $name .= $vehicle->storefrontYearRangeSuffix();
+        $name .= $this->storefrontYearSuffixForLinkedVehicle($vehicle);
 
         $detailParts = array_values(array_filter([
             $vehicle->body_type !== null && trim((string) $vehicle->body_type) !== ''
@@ -290,9 +290,52 @@ class Product extends Model
             $oem = $pivot && isset($pivot->oem_number) && $pivot->oem_number !== null && trim((string) $pivot->oem_number) !== ''
                 ? trim((string) $pivot->oem_number)
                 : null;
-            $sync[$id] = ['oem_number' => $oem];
+            $sync[$id] = [
+                'oem_number' => $oem,
+                'compat_year_from' => null,
+                'compat_year_to' => null,
+            ];
         }
         $this->vehicles()->sync($sync);
+    }
+
+    /**
+     * @param  array<int, array{compat_year_from: ?int, compat_year_to: ?int}>  $pivotByVehicleId
+     */
+    public function syncVehiclesPreservingOemAndCompat(array $pivotByVehicleId): void
+    {
+        $existing = $this->vehicles()->get()->keyBy('id');
+        $sync = [];
+        foreach ($pivotByVehicleId as $id => $meta) {
+            $id = (int) $id;
+            $pivot = $existing->get($id)?->pivot;
+            $oem = $pivot && isset($pivot->oem_number) && $pivot->oem_number !== null && trim((string) $pivot->oem_number) !== ''
+                ? trim((string) $pivot->oem_number)
+                : null;
+            $sync[$id] = [
+                'oem_number' => $oem,
+                'compat_year_from' => $meta['compat_year_from'] ?? null,
+                'compat_year_to' => $meta['compat_year_to'] ?? null,
+            ];
+        }
+        $this->vehicles()->sync($sync);
+    }
+
+    /**
+     * Суффикс лет для строки совместимости: уточнение из pivot или диапазон записи ТС.
+     */
+    public function storefrontYearSuffixForLinkedVehicle(Vehicle $vehicle): string
+    {
+        $p = $vehicle->pivot;
+        if ($p !== null
+            && $p->compat_year_from !== null && $p->compat_year_to !== null) {
+            return Vehicle::storefrontYearRangeSuffixFromValues(
+                (int) $p->compat_year_from,
+                (int) $p->compat_year_to
+            );
+        }
+
+        return $vehicle->storefrontYearRangeSuffix();
     }
 
     public function getMainImageAttribute(): ?ProductImage

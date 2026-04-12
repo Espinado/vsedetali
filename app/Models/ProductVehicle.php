@@ -16,7 +16,17 @@ class ProductVehicle extends Model
         'product_id',
         'vehicle_id',
         'oem_number',
+        'compat_year_from',
+        'compat_year_to',
     ];
+
+    protected function casts(): array
+    {
+        return [
+            'compat_year_from' => 'integer',
+            'compat_year_to' => 'integer',
+        ];
+    }
 
     public function product(): BelongsTo
     {

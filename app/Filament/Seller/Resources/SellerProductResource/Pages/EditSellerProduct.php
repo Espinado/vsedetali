@@ -23,7 +23,7 @@ class EditSellerProduct extends EditRecord
     protected static string $resource = SellerProductResource::class;
 
     /**
-     * @var array{name: string, images: list<string>, vehicle_ids: array<int>, slug: string}|null
+     * @var array{name: string, images: list<string>, vehicle_sync: array<int, array{compat_year_from: ?int, compat_year_to: ?int}>, slug: string}|null
      */
     protected ?array $catalogUpdatePayload = null;
 
@@ -74,7 +74,7 @@ class EditSellerProduct extends EditRecord
         $rows = $product->vehicles->map(fn (Vehicle $v): array => [
             'vehicle_make' => $v->make,
             'vehicle_model' => $v->model,
-            'compatibility_years' => $v->discreteYearsCovered(),
+            'compatibility_years' => SellerListingVehicleCompatibilities::formStateForVehicleCompatibilityYears($v, $v->pivot),
             'vehicle_row_ids' => [$v->id],
         ])->values()->all();
 
@@ -82,7 +82,7 @@ class EditSellerProduct extends EditRecord
             [
                 'vehicle_make' => null,
                 'vehicle_model' => null,
-                'compatibility_years' => [],
+                'compatibility_years' => null,
                 'vehicle_row_ids' => [],
             ],
         ];
@@ -142,7 +142,7 @@ class EditSellerProduct extends EditRecord
 
         $name = trim((string) ($data['listing_name'] ?? ''));
         $images = array_values(array_filter($data['listing_images'] ?? []));
-        $vehicleIds = SellerListingVehicleCompatibilities::collectVehicleIds($normalized)->all();
+        $vehicleSync = SellerListingVehicleCompatibilities::collectVehiclePivotSync($normalized);
 
         $product = $this->record->product;
         $product?->loadMissing('brand');
@@ -151,7 +151,7 @@ class EditSellerProduct extends EditRecord
         $this->catalogUpdatePayload = [
             'name' => $name,
             'images' => $images,
-            'vehicle_ids' => $vehicleIds,
+            'vehicle_sync' => $vehicleSync,
             'slug' => ProductCatalogSlug::unique($name, $brandName !== null && $brandName !== '' ? $brandName : null, $product?->id),
         ];
 
@@ -185,7 +185,7 @@ class EditSellerProduct extends EditRecord
                     'name' => $catalog['name'],
                     'slug' => $catalog['slug'],
                 ]);
-                $product->vehicles()->sync($catalog['vehicle_ids']);
+                $product->syncVehiclesPreservingOemAndCompat($catalog['vehicle_sync']);
                 $product->images()->delete();
                 foreach ($catalog['images'] as $i => $path) {
                     ProductImage::query()->create([

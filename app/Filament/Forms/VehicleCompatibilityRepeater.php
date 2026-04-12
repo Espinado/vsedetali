@@ -3,6 +3,7 @@
 namespace App\Filament\Forms;
 
 use App\Models\Vehicle;
+use App\Support\SellerListingVehicleCompatibilities;
 use Filament\Forms;
 use Filament\Forms\Components\Repeater;
 use Filament\Forms\Get;
@@ -43,9 +44,11 @@ final class VehicleCompatibilityRepeater
                 if (is_array($picked) && $picked !== []) {
                     $label .= ' · '.count($picked).' з.';
                 }
-                $years = $state['compatibility_years'] ?? [];
-                if (is_array($years) && $years !== []) {
-                    $label .= ' · '.count($years).' г.';
+                $cy = $state['compatibility_years'] ?? null;
+                if (is_array($cy) && $cy !== []) {
+                    $label .= ' · '.count($cy).' г.';
+                } elseif (is_string($cy) && trim($cy) !== '') {
+                    $label .= ' · годы';
                 }
 
                 return $label;
@@ -63,7 +66,7 @@ final class VehicleCompatibilityRepeater
                     ->live()
                     ->afterStateUpdated(function (Set $set): void {
                         $set('vehicle_model', null);
-                        $set('compatibility_years', []);
+                        $set('compatibility_years', null);
                         $set('vehicle_row_ids', []);
                     })
                     ->required(),
@@ -86,14 +89,14 @@ final class VehicleCompatibilityRepeater
                     ->searchable()
                     ->live()
                     ->afterStateUpdated(function (Set $set): void {
-                        $set('compatibility_years', []);
+                        $set('compatibility_years', null);
                         $set('vehicle_row_ids', []);
                     })
                     ->required()
                     ->disabled(fn (Get $get): bool => blank($get('vehicle_make'))),
                 Forms\Components\CheckboxList::make('vehicle_row_ids')
                     ->label('Записи из справочника')
-                    ->helperText('Если для этой модели несколько строк (разные годы или поколения), отметьте нужные. Можно только так, только по годам ниже или оба способа сразу.')
+                    ->helperText('Блок целиком (и поиск по списку) только если есть строки справочника с годами. Поиск — при более чем шести таких строках. В подписи — годы (или поколение). Отметьте нужные и сузьте годы в поле ниже.')
                     ->options(function (Get $get): array {
                         $make = $get('vehicle_make');
                         $model = $get('vehicle_model');
@@ -101,43 +104,77 @@ final class VehicleCompatibilityRepeater
                             return [];
                         }
 
-                        return Vehicle::query()
-                            ->where('make', $make)
-                            ->where('model', $model)
-                            ->orderBy('generation')
-                            ->orderBy('year_from')
-                            ->orderBy('year_to')
-                            ->orderBy('id')
-                            ->get()
+                        return Vehicle::compatibilityPickerRowsWithDefinedYears($make, $model)
                             ->mapWithKeys(fn (Vehicle $v): array => [$v->id => $v->adminCompatibilityPickerLabel()])
                             ->all();
                     })
-                    ->searchable()
+                    ->searchable(function (Get $get): bool {
+                        $make = $get('vehicle_make');
+                        $model = $get('vehicle_model');
+                        if (blank($make) || blank($model)) {
+                            return false;
+                        }
+
+                        return Vehicle::compatibilityPickerRowsWithDefinedYears($make, $model)->count() > 6;
+                    })
                     ->bulkToggleable()
                     ->live()
+                    ->hidden(function (Get $get): bool {
+                        if (blank($get('vehicle_make')) || blank($get('vehicle_model'))) {
+                            return true;
+                        }
+
+                        return Vehicle::compatibilityPickerRowsWithDefinedYears($get('vehicle_make'), $get('vehicle_model'))->isEmpty();
+                    })
+                    ->dehydrated(function (Get $get): bool {
+                        if (blank($get('vehicle_make')) || blank($get('vehicle_model'))) {
+                            return false;
+                        }
+
+                        return Vehicle::compatibilityPickerRowsWithDefinedYears($get('vehicle_make'), $get('vehicle_model'))->isNotEmpty();
+                    })
                     ->disabled(fn (Get $get): bool => blank($get('vehicle_make')) || blank($get('vehicle_model'))),
                 Forms\Components\Select::make('compatibility_years')
                     ->label('Годы выпуска')
                     ->multiple()
                     ->searchable()
-                    ->options(function (Get $get): array {
-                        return Vehicle::yearSelectOptionsForCompatibilityPicker(
-                            $get('vehicle_make'),
-                            $get('vehicle_model')
-                        );
-                    })
-                    ->helperText(function (Get $get): string {
+                    ->options(fn (Get $get): array => Vehicle::yearSelectOptionsForCompatibilityPicker(
+                        $get('vehicle_make'),
+                        $get('vehicle_model')
+                    ))
+                    ->helperText('Если отмечены записи из справочника — укажите годы применимости (можно сузить относительно выбранных строк). Список лет — только из диапазонов, заданных в справочнике для этой пары.')
+                    ->hidden(function (Get $get): bool {
                         if (blank($get('vehicle_make')) || blank($get('vehicle_model'))) {
-                            return 'Сначала выберите марку и модель.';
+                            return true;
                         }
-                        $catalog = Vehicle::yearOptionsForMakeAndModel(
-                            $get('vehicle_make'),
-                            $get('vehicle_model')
-                        );
 
-                        return $catalog !== []
-                            ? 'Необязательно, если выбраны записи из справочника выше. Иначе отметьте годы в списке — только те, что есть в справочнике для этой пары марка/модель (ввод текста недоступен).'
-                            : 'Необязательно, если выбраны записи из справочника выше. В справочнике для этой пары не заданы диапазоны годов — доступен выбор любого года 1900–2100 (поиск по полю).';
+                        return ! Vehicle::catalogHasYearRangesForMakeAndModel($get('vehicle_make'), $get('vehicle_model'));
+                    })
+                    ->dehydrated(function (Get $get): bool {
+                        if (blank($get('vehicle_make')) || blank($get('vehicle_model'))) {
+                            return false;
+                        }
+
+                        return Vehicle::catalogHasYearRangesForMakeAndModel($get('vehicle_make'), $get('vehicle_model'));
+                    }),
+                Forms\Components\TextInput::make('compatibility_years')
+                    ->label('Годы выпуска')
+                    ->placeholder('Например: 2015–2020 или 2019, 2020')
+                    ->helperText(SellerListingVehicleCompatibilities::freeformCompatibilityYearsFieldHint())
+                    ->maxLength(500)
+                    ->hidden(function (Get $get): bool {
+                        if (blank($get('vehicle_make')) || blank($get('vehicle_model'))) {
+                            return true;
+                        }
+
+                        return Vehicle::catalogHasYearRangesForMakeAndModel($get('vehicle_make'), $get('vehicle_model'));
+                    })
+                    ->dehydrated(function (Get $get): bool {
+                        if (blank($get('vehicle_make')) || blank($get('vehicle_model'))) {
+                            return false;
+                        }
+
+                        return ! Vehicle::catalogHasYearRangesForMakeAndModel($get('vehicle_make'), $get('vehicle_model'));
                     })
                     ->disabled(fn (Get $get): bool => blank($get('vehicle_make')) || blank($get('vehicle_model'))),
             ]);

@@ -33,7 +33,7 @@ class SellerSubmittedProductService
             throw ValidationException::withMessages(['listing_images' => 'Загрузите хотя бы одно фото.']);
         }
 
-        $vehicleIds = SellerListingVehicleCompatibilities::collectVehicleIds($rows);
+        $vehicleSync = SellerListingVehicleCompatibilities::collectVehiclePivotSync($rows);
 
         $warehouseId = Warehouse::query()
             ->where('seller_id', $sellerId)
@@ -47,7 +47,7 @@ class SellerSubmittedProductService
             ]);
         }
 
-        return DB::transaction(function () use ($sellerId, $data, $name, $vehicleIds, $images, $warehouseId): SellerProduct {
+        return DB::transaction(function () use ($sellerId, $data, $name, $vehicleSync, $images, $warehouseId): SellerProduct {
             $category = Category::query()->firstOrCreate(
                 ['slug' => Category::MARKETPLACE_MODERATION_SLUG],
                 [
@@ -75,7 +75,7 @@ class SellerSubmittedProductService
                 'type' => 'part',
             ]);
 
-            $product->vehicles()->sync($vehicleIds->all());
+            $product->syncVehiclesPreservingOemAndCompat($vehicleSync);
 
             foreach ($images as $i => $path) {
                 ProductImage::query()->create([

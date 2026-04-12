@@ -83,6 +83,70 @@ class Vehicle extends Model
     }
 
     /**
+     * Суффикс годов для витрины по явным границам (уточнение в pivot товара).
+     */
+    public static function storefrontYearRangeSuffixFromValues(?int $yearFrom, ?int $yearTo): string
+    {
+        if ($yearFrom === null && $yearTo === null) {
+            return '';
+        }
+        if ($yearFrom !== null && $yearTo !== null) {
+            $from = (int) $yearFrom;
+            $to = (int) $yearTo;
+            if ($from > $to) {
+                [$from, $to] = [$to, $from];
+            }
+
+            return $from === $to
+                ? ' ('.$from.')'
+                : ' ('.$from.'–'.$to.')';
+        }
+        if ($yearFrom !== null) {
+            return ' (с '.(int) $yearFrom.')';
+        }
+
+        return ' (до '.(int) $yearTo.')';
+    }
+
+    /**
+     * Границы применимости по записи справочника для пересечения с выбранными годами (null в БД → открытый конец).
+     *
+     * @return array{0: int, 1: int}
+     */
+    public function logicalYearBoundsInclusive(): array
+    {
+        $from = $this->year_from ?? 1900;
+        $to = $this->year_to ?? 2100;
+        $from = (int) $from;
+        $to = (int) $to;
+        if ($from > $to) {
+            [$from, $to] = [$to, $from];
+        }
+
+        return [$from, $to];
+    }
+
+    /**
+     * Годы из списка, попадающие в границы этой записи ТС.
+     *
+     * @param  list<int>  $years
+     * @return list<int>
+     */
+    public function intersectYearListWithBounds(array $years): array
+    {
+        [$vf, $vt] = $this->logicalYearBoundsInclusive();
+        $out = [];
+        foreach (array_unique(array_map('intval', $years)) as $y) {
+            if ($y >= $vf && $y <= $vt) {
+                $out[] = $y;
+            }
+        }
+        sort($out);
+
+        return $out;
+    }
+
+    /**
      * Краткая строка для карточки товара: «BMW X5 (2010–2020), универсал, 2.0 TDI».
      */
     public function shortCompatibilityLabel(): string
@@ -185,31 +249,85 @@ class Vehicle extends Model
     }
 
     /**
-     * Варианты для мультивыбора «годы»: если в справочнике для пары марка/модель есть годы — только они;
-     * иначе полный допустимый диапазон 1900–2100 (ввод текста исключён, ошибиться в формате нельзя).
+     * Значение поля «годы» при открытии формы: массив для мультивыбора (если в справочнике есть годы) или строка для ручного ввода.
+     */
+    public function compatibilityYearsFormState(): array|string|null
+    {
+        $opts = static::yearOptionsForMakeAndModel($this->make, $this->model);
+        $disc = $this->discreteYearsCovered();
+        if ($opts !== []) {
+            $allowed = array_flip(array_map('intval', array_keys($opts)));
+
+            return array_values(array_filter($disc, fn (int $y): bool => isset($allowed[$y])));
+        }
+        if ($disc === []) {
+            return null;
+        }
+
+        return implode(', ', $disc);
+    }
+
+    /**
+     * Варианты мультивыбора «годы» — только если в справочнике для пары марка/модель заданы диапазоны; иначе пусто (годы вводятся вручную).
      *
      * @return array<int, string>
      */
     public static function yearSelectOptionsForCompatibilityPicker(?string $make, ?string $model): array
     {
-        $fromCatalog = self::yearOptionsForMakeAndModel($make, $model);
-        if ($fromCatalog !== []) {
-            return $fromCatalog;
-        }
-        $out = [];
-        for ($y = 1900; $y <= 2100; $y++) {
-            $out[$y] = (string) $y;
-        }
-
-        return $out;
+        return self::yearOptionsForMakeAndModel($make, $model);
     }
 
     /**
+     * В справочнике для пары марка/модель заданы диапазоны годов (есть смысл выбирать конкретные строки и мультивыбор лет).
+     */
+    public static function catalogHasYearRangesForMakeAndModel(?string $make, ?string $model): bool
+    {
+        return self::yearOptionsForMakeAndModel($make, $model) !== [];
+    }
+
+    /**
+     * Строки справочника для чекбоксов «записи из справочника»: та же марка/модель и у записи заданы годы (есть что показать в списке).
+     *
+     * @return Collection<int, self>
+     */
+    public static function compatibilityPickerRowsWithDefinedYears(?string $make, ?string $model): Collection
+    {
+        if ($make === null || $model === null || trim($make) === '' || trim($model) === '') {
+            return collect();
+        }
+        if (! static::catalogHasYearRangesForMakeAndModel($make, $model)) {
+            return collect();
+        }
+
+        return static::query()
+            ->where('make', $make)
+            ->where('model', $model)
+            ->orderBy('generation')
+            ->orderBy('year_from')
+            ->orderBy('year_to')
+            ->orderBy('id')
+            ->get()
+            ->filter(fn (self $v): bool => $v->discreteYearsCovered() !== [])
+            ->values();
+    }
+
+    /**
+     * Допустимые целые годы для проверки: годы из справочника по паре или весь диапазон 1900–2100, если в справочнике годов нет.
+     *
      * @return list<int>
      */
     public static function yearAllowedIntsForCompatibilityPicker(?string $make, ?string $model): array
     {
-        return array_map('intval', array_keys(self::yearSelectOptionsForCompatibilityPicker($make, $model)));
+        $catalog = self::yearOptionsForMakeAndModel($make, $model);
+        if ($catalog !== []) {
+            return array_map('intval', array_keys($catalog));
+        }
+        $out = [];
+        for ($y = 1900; $y <= 2100; $y++) {
+            $out[] = $y;
+        }
+
+        return $out;
     }
 
     /**
@@ -244,6 +362,7 @@ class Vehicle extends Model
 
     /**
      * Подпись строки справочника в чекбоксах «записи из справочника» (админка и кабинет продавца).
+     * Диапазон годов включается через {@see shortCompatibilityLabel()} (в скобках после модели/поколения).
      */
     public function adminCompatibilityPickerLabel(): string
     {

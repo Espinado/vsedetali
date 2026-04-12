@@ -158,4 +158,109 @@ class VehiclePartsCatalogTest extends TestCase
             ->assertOk()
             ->assertDontSee('Уникальная деталь Golf годовой фильтр', false);
     }
+
+    /**
+     * Уточнение лет в pivot сужает применимость относительно year_from–year_to записи справочника.
+     */
+    public function test_parts_by_car_without_vehicle_id_respects_pivot_year_subset(): void
+    {
+        $category = Category::create([
+            'name' => 'CatPivot',
+            'slug' => 'cat-pivot-year',
+            'is_active' => true,
+        ]);
+        $brand = Brand::create([
+            'name' => 'BrandPivot',
+            'slug' => 'brand-pivot-year',
+            'is_active' => true,
+        ]);
+        $vehicle = Vehicle::create([
+            'make' => 'Seat',
+            'model' => 'Leon',
+            'generation' => null,
+            'year_from' => 2012,
+            'year_to' => 2019,
+            'engine' => null,
+            'body_type' => null,
+        ]);
+        $product = Product::create([
+            'category_id' => $category->id,
+            'brand_id' => $brand->id,
+            'sku' => 'VP-PIVOT-001',
+            'name' => 'Деталь Leon только 2015',
+            'slug' => 'test-vp-pivot-001',
+            'price' => 11,
+            'is_active' => true,
+            'type' => 'part',
+        ]);
+        $product->vehicles()->attach($vehicle->id, [
+            'compat_year_from' => 2015,
+            'compat_year_to' => 2015,
+        ]);
+
+        $base = [
+            'vehicleMake' => 'Seat',
+            'vehicleModel' => 'Leon',
+        ];
+
+        $this->get(route('vehicle.by_car', array_merge($base, ['vehicleYear' => 2015])))
+            ->assertOk()
+            ->assertSee('Деталь Leon только 2015', false);
+
+        $this->get(route('vehicle.by_car', array_merge($base, ['vehicleYear' => 2012])))
+            ->assertOk()
+            ->assertDontSee('Деталь Leon только 2015', false);
+    }
+
+    public function test_parts_by_car_with_vehicle_id_filters_year_by_pivot(): void
+    {
+        $category = Category::create([
+            'name' => 'CatVid',
+            'slug' => 'cat-vid-year',
+            'is_active' => true,
+        ]);
+        $brand = Brand::create([
+            'name' => 'BrandVid',
+            'slug' => 'brand-vid-year',
+            'is_active' => true,
+        ]);
+        $vehicle = Vehicle::create([
+            'make' => 'Skoda',
+            'model' => 'Octavia',
+            'generation' => null,
+            'year_from' => 2013,
+            'year_to' => 2020,
+            'engine' => null,
+            'body_type' => null,
+        ]);
+        $product = Product::create([
+            'category_id' => $category->id,
+            'brand_id' => $brand->id,
+            'sku' => 'VP-VID-001',
+            'name' => 'Деталь Octavia pivot 2016-2017',
+            'slug' => 'test-vp-vid-001',
+            'price' => 12,
+            'is_active' => true,
+            'type' => 'part',
+        ]);
+        $product->vehicles()->attach($vehicle->id, [
+            'compat_year_from' => 2016,
+            'compat_year_to' => 2017,
+        ]);
+
+        $q = [
+            'vehicleId' => $vehicle->id,
+            'vehicleMake' => 'Skoda',
+            'vehicleModel' => 'Octavia',
+            'vehicleYear' => 2016,
+        ];
+        $this->get(route('vehicle.by_car', $q))
+            ->assertOk()
+            ->assertSee('Деталь Octavia pivot 2016-2017', false);
+
+        $q['vehicleYear'] = 2014;
+        $this->get(route('vehicle.by_car', $q))
+            ->assertOk()
+            ->assertDontSee('Деталь Octavia pivot 2016-2017', false);
+    }
 }

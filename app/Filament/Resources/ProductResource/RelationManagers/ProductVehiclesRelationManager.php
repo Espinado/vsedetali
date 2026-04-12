@@ -30,6 +30,18 @@ class ProductVehiclesRelationManager extends RelationManager
                     ->label('OEM номер')
                     ->maxLength(100)
                     ->nullable(),
+                Forms\Components\TextInput::make('compat_year_from')
+                    ->label('Год применимости с')
+                    ->numeric()
+                    ->minValue(1900)
+                    ->maxValue(2100)
+                    ->nullable(),
+                Forms\Components\TextInput::make('compat_year_to')
+                    ->label('Год применимости по')
+                    ->numeric()
+                    ->minValue(1900)
+                    ->maxValue(2100)
+                    ->nullable(),
             ]);
     }
 
@@ -49,9 +61,17 @@ class ProductVehiclesRelationManager extends RelationManager
                 Tables\Columns\TextColumn::make('vehicle.generation')
                     ->label('Поколение')
                     ->placeholder('—'),
-                Tables\Columns\TextColumn::make('years')
-                    ->label('Годы')
-                    ->state(fn ($record): string => trim(($record->vehicle->year_from ?? '—') . ' - ' . ($record->vehicle->year_to ?? '—'))),
+                Tables\Columns\TextColumn::make('compat_years')
+                    ->label('Годы (карточка)')
+                    ->state(function ($record): string {
+                        $cf = $record->compat_year_from;
+                        $ct = $record->compat_year_to;
+                        if ($cf !== null && $ct !== null) {
+                            return $cf === $ct ? (string) $cf : "{$cf}–{$ct}";
+                        }
+
+                        return trim(($record->vehicle->year_from ?? '—').' - '.($record->vehicle->year_to ?? '—'));
+                    }),
                 Tables\Columns\TextColumn::make('oem_number')
                     ->label('OEM')
                     ->placeholder('—')

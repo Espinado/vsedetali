@@ -27,7 +27,7 @@ class EditProduct extends EditRecord
         $rows = $this->record->vehicles->map(fn (Vehicle $v): array => [
             'vehicle_make' => $v->make,
             'vehicle_model' => $v->model,
-            'compatibility_years' => $v->discreteYearsCovered(),
+            'compatibility_years' => SellerListingVehicleCompatibilities::formStateForVehicleCompatibilityYears($v, $v->pivot),
             'vehicle_row_ids' => [$v->id],
         ])->values()->all();
 
@@ -35,7 +35,7 @@ class EditProduct extends EditRecord
             [
                 'vehicle_make' => null,
                 'vehicle_model' => null,
-                'compatibility_years' => [],
+                'compatibility_years' => null,
                 'vehicle_row_ids' => [],
             ],
         ];
@@ -99,8 +99,9 @@ class EditProduct extends EditRecord
         if ($rows === []) {
             $this->record->vehicles()->detach();
         } else {
-            $ids = SellerListingVehicleCompatibilities::collectVehicleIds($rows);
-            $this->record->syncVehiclesByIdsPreservingOem($ids->all());
+            $this->record->syncVehiclesPreservingOemAndCompat(
+                SellerListingVehicleCompatibilities::collectVehiclePivotSync($rows)
+            );
         }
 
         if ($this->pendingGalleryPaths !== null) {

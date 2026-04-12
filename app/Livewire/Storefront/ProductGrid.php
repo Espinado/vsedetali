@@ -404,8 +404,11 @@ class ProductGrid extends Component
             ->when(! in_array('brand', $except, true) && $brandId > 0, fn (Builder $q) => $q->where('brand_id', $brandId))
             ->when(! in_array('vehicleMake', $except, true), function (Builder $q) use ($vehicleYear, $except) {
                 if ($this->vehicleId > 0) {
-                    $q->whereHas('vehicles', function (Builder $vehicleQuery) {
-                        $vehicleQuery->where('vehicles.id', $this->vehicleId);
+                    $q->whereHas('vehicles', function (Builder $vehicleQuery) use ($vehicleYear, $except) {
+                        $vehicleQuery->where('vehicles.id', $this->vehicleId)
+                            ->when(! in_array('vehicleYear', $except, true) && $vehicleYear > 0, function (Builder $yq) use ($vehicleYear): void {
+                                self::applyVehicleYearConstraintForProductVehicleLink($yq, $vehicleYear);
+                            });
                     });
                 } elseif ($this->vehicleMake !== '') {
                     $q->whereHas('vehicles', function (Builder $vehicleQuery) use ($vehicleYear, $except) {
@@ -425,12 +428,8 @@ class ProductGrid extends Component
                                         });
                                 });
                             })
-                            ->when(! in_array('vehicleYear', $except, true) && $vehicleYear > 0, function (Builder $yearQuery) use ($vehicleYear) {
-                                $yearQuery->where(function (Builder $rangeQuery) use ($vehicleYear) {
-                                    $rangeQuery->whereNull('year_from')->orWhere('year_from', '<=', $vehicleYear);
-                                })->where(function (Builder $rangeQuery) use ($vehicleYear) {
-                                    $rangeQuery->whereNull('year_to')->orWhere('year_to', '>=', $vehicleYear);
-                                });
+                            ->when(! in_array('vehicleYear', $except, true) && $vehicleYear > 0, function (Builder $yearQuery) use ($vehicleYear): void {
+                                self::applyVehicleYearConstraintForProductVehicleLink($yearQuery, $vehicleYear);
                             });
                     });
                 }
@@ -456,6 +455,30 @@ class ProductGrid extends Component
                         });
                 });
             });
+    }
+
+    /**
+     * Год с витрины сопоставляем с привязкой: при заданных compat_year_* в pivot они главнее диапазона записи ТС.
+     */
+    protected static function applyVehicleYearConstraintForProductVehicleLink(Builder $vehicleQuery, int $vehicleYear): void
+    {
+        $vehicleQuery->where(function (Builder $w) use ($vehicleYear): void {
+            $w->where(function (Builder $p) use ($vehicleYear): void {
+                $p->whereNotNull('product_vehicle.compat_year_from')
+                    ->whereNotNull('product_vehicle.compat_year_to')
+                    ->where('product_vehicle.compat_year_from', '<=', $vehicleYear)
+                    ->where('product_vehicle.compat_year_to', '>=', $vehicleYear);
+            })->orWhere(function (Builder $v) use ($vehicleYear): void {
+                $v->where(function (Builder $pv): void {
+                    $pv->whereNull('product_vehicle.compat_year_from')
+                        ->orWhereNull('product_vehicle.compat_year_to');
+                })->where(function (Builder $rangeQuery) use ($vehicleYear): void {
+                    $rangeQuery->whereNull('vehicles.year_from')->orWhere('vehicles.year_from', '<=', $vehicleYear);
+                })->where(function (Builder $rangeQuery) use ($vehicleYear): void {
+                    $rangeQuery->whereNull('vehicles.year_to')->orWhere('vehicles.year_to', '>=', $vehicleYear);
+                });
+            });
+        });
     }
 
     public function updatedCategorySlug(): void
