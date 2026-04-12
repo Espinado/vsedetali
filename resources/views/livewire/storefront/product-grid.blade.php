@@ -176,6 +176,7 @@
                 </label>
             </div>
 
+            @if($this->brandsInCategory->isNotEmpty())
             <details class="sidebar-accordion rounded-lg border border-orange-100/80 bg-orange-50/40 shadow-sm">
                 <summary class="flex w-full cursor-pointer list-none items-center justify-between gap-2 rounded-lg px-3 py-3 text-left transition hover:bg-orange-50/80 [&::-webkit-details-marker]:hidden">
                     <span class="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
@@ -187,32 +188,29 @@
                     </svg>
                 </summary>
                 <div class="max-h-64 overflow-y-auto overscroll-contain rounded-b-lg border-t border-orange-100 bg-white px-2 py-2.5">
-                    @if($this->brandsInCategory->isNotEmpty())
-                        <ul class="space-y-1">
+                    <ul class="space-y-1">
+                        <li>
+                            <label class="flex cursor-pointer items-center gap-3 rounded-md px-2 py-2 hover:bg-orange-50/60">
+                                <input type="radio" name="brandFilter" value="0"
+                                       wire:model.live="brandId"
+                                       class="h-4 w-4 shrink-0 border-stone-300 text-orange-600 focus:ring-orange-500">
+                                <span class="text-base leading-snug text-slate-700">Все бренды</span>
+                            </label>
+                        </li>
+                        @foreach($this->brandsInCategory as $brand)
                             <li>
-                                <label class="flex cursor-pointer items-center gap-3 rounded-md px-2 py-2 hover:bg-orange-50/60">
-                                    <input type="radio" name="brandFilter" value="0"
+                            <label class="flex cursor-pointer items-center gap-3 rounded-md px-2 py-2 hover:bg-orange-50/60">
+                                <input type="radio" name="brandFilter" value="{{ $brand->id }}"
                                            wire:model.live="brandId"
                                            class="h-4 w-4 shrink-0 border-stone-300 text-orange-600 focus:ring-orange-500">
-                                    <span class="text-base leading-snug text-slate-700">Все бренды</span>
+                                    <span class="text-base leading-snug text-slate-700">{{ $brand->name }}</span>
                                 </label>
                             </li>
-                            @foreach($this->brandsInCategory as $brand)
-                                <li>
-                                <label class="flex cursor-pointer items-center gap-3 rounded-md px-2 py-2 hover:bg-orange-50/60">
-                                    <input type="radio" name="brandFilter" value="{{ $brand->id }}"
-                                               wire:model.live="brandId"
-                                               class="h-4 w-4 shrink-0 border-stone-300 text-orange-600 focus:ring-orange-500">
-                                        <span class="text-base leading-snug text-slate-700">{{ $brand->name }}</span>
-                                    </label>
-                                </li>
-                            @endforeach
-                        </ul>
-                    @else
-                        <p class="px-2 py-2 text-base leading-snug text-slate-500">Для текущего набора фильтров брендов нет.</p>
-                    @endif
+                        @endforeach
+                    </ul>
                 </div>
             </details>
+            @endif
 
             @if($brandId > 0 || $search !== '' || $sort !== 'name_asc' || $vehicleMake !== '' || $vehicleModel !== '' || $vehicleYear > 0 || $vehicleId > 0 || $priceFrom !== '' || $priceTo !== '' || $inStockOnly)
                 <button type="button" wire:click="clearFilters"

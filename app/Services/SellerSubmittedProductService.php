@@ -17,7 +17,7 @@ use Illuminate\Validation\ValidationException;
 class SellerSubmittedProductService
 {
     /**
-     * @param  array{vehicle_compatibilities: list<array{vehicle_make: string, vehicle_model: string, compatibility_years: array<int|string>}>, listing_name: string, listing_images: list<string>|null, price: float|int|string, cost_price?: float|int|string|null, quantity: int|string, oem_code?: string|null, article?: string|null, shipping_days?: int|string|null}  $data
+     * @param  array{vehicle_compatibilities: list<array{vehicle_make: string, vehicle_model: string, compatibility_years?: array<int>, vehicle_row_ids?: array<int>}>, listing_name: string, listing_images: list<string>|null, price: float|int|string, cost_price?: float|int|string|null, quantity: int|string, oem_code?: string|null, article?: string|null, shipping_days?: int|string|null}  $data
      */
     public function createListing(int $sellerId, array $data): SellerProduct
     {

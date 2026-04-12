@@ -65,7 +65,7 @@ class ProductResource extends Resource
                 Forms\Components\RichEditor::make('description')
                     ->columnSpanFull(),
                 Forms\Components\Section::make('Совместимость с авто')
-                    ->description('Марка, модель и годы выпуска — из справочника «Автомобили». Несколько строк: разные марки/модели или разные годы. OEM по строкам можно уточнить во вкладке «Совместимость с автомобилями».')
+                    ->description('Марка и модель — из справочника «Автомобили». Для одной модели с разными поколениями/годами отметьте нужные строки справочника или укажите годы (или оба способа). OEM по строкам — во вкладке «Совместимость с автомобилями».')
                     ->schema([
                         VehicleCompatibilityRepeater::make()
                             ->columnSpanFull(),
@@ -100,8 +100,18 @@ class ProductResource extends Resource
                     ->collapsed()
                     ->collapsible(),
                 Forms\Components\TextInput::make('weight')
+                    ->label('Вес, кг')
+                    ->helperText('Необязательно.')
                     ->numeric()
-                    ->nullable(),
+                    ->default(null)
+                    ->rules(['nullable', 'numeric', 'min:0'])
+                    ->dehydrateStateUsing(function ($state): ?string {
+                        if ($state === null || $state === '') {
+                            return null;
+                        }
+
+                        return is_numeric($state) ? (string) $state : null;
+                    }),
                 Forms\Components\TextInput::make('price')
                     ->label('Продажная цена')
                     ->required()

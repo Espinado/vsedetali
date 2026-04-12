@@ -209,11 +209,17 @@ class ProductGrid extends Component
         return $this->brandsInCategory->count();
     }
 
+    /**
+     * Бренды для фильтра витрины: без служебной заглушки площадки (нет смысла показывать «Без бренда»).
+     */
     public function getBrandsInCategoryProperty()
     {
-        $query = Brand::active()->whereHas('products', function (Builder $q) {
-            $this->applyProductFilters($q, ['brand']);
-        })->orderBy('name');
+        $query = Brand::active()
+            ->where('slug', '!=', Brand::PLATFORM_UNKNOWN_SLUG)
+            ->whereHas('products', function (Builder $q) {
+                $this->applyProductFilters($q, ['brand']);
+            })
+            ->orderBy('name');
 
         return $query->get();
     }

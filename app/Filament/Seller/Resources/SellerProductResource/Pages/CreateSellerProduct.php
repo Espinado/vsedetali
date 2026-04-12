@@ -74,8 +74,10 @@ class CreateSellerProduct extends CreateRecord
                 'vehicle_compatibilities' => ['required', 'array', 'min:1'],
                 'vehicle_compatibilities.*.vehicle_make' => ['required', 'string', 'max:100'],
                 'vehicle_compatibilities.*.vehicle_model' => ['required', 'string', 'max:100'],
-                'vehicle_compatibilities.*.compatibility_years' => ['required', 'array', 'min:1'],
+                'vehicle_compatibilities.*.compatibility_years' => ['nullable', 'array'],
                 'vehicle_compatibilities.*.compatibility_years.*' => ['integer', 'min:1900', 'max:2100'],
+                'vehicle_compatibilities.*.vehicle_row_ids' => ['nullable', 'array'],
+                'vehicle_compatibilities.*.vehicle_row_ids.*' => ['integer', 'exists:vehicles,id'],
                 'listing_name' => ['required', 'string', 'max:500'],
                 'listing_images' => ['required', 'array', 'min:1', 'max:12'],
                 'listing_images.*' => ['required', 'string', 'max:500'],
@@ -89,6 +91,8 @@ class CreateSellerProduct extends CreateRecord
             $messages,
             $attributes
         )->validate();
+
+        SellerListingVehicleCompatibilities::assertSellerRowsHavePickOrYears($data['vehicle_compatibilities']);
 
         return app(SellerSubmittedProductService::class)->createListing($staff->seller_id, $data);
     }

@@ -27,14 +27,16 @@ class EditProduct extends EditRecord
         $rows = $this->record->vehicles->map(fn (Vehicle $v): array => [
             'vehicle_make' => $v->make,
             'vehicle_model' => $v->model,
-            'compatibility_years' => SellerListingVehicleCompatibilities::formatVehicleYearsForInput($v),
+            'compatibility_years' => $v->discreteYearsCovered(),
+            'vehicle_row_ids' => [$v->id],
         ])->values()->all();
 
         $data['vehicle_compatibilities'] = $rows !== [] ? $rows : [
             [
                 'vehicle_make' => null,
                 'vehicle_model' => null,
-                'compatibility_years' => null,
+                'compatibility_years' => [],
+                'vehicle_row_ids' => [],
             ],
         ];
 

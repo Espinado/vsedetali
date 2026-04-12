@@ -107,4 +107,55 @@ class VehiclePartsCatalogTest extends TestCase
             ->assertSee('2008', false)
             ->assertSee('2015', false);
     }
+
+    /**
+     * Без vehicleId витрина фильтрует по марке/модели и году: год должен попадать в year_from–year_to
+     * у привязанной записи справочника (как при сохранении товара через collectVehicleIds).
+     */
+    public function test_parts_by_car_without_vehicle_id_filters_by_year_against_vehicle_ranges(): void
+    {
+        $category = Category::create([
+            'name' => 'CatYear',
+            'slug' => 'cat-year-filter',
+            'is_active' => true,
+        ]);
+        $brand = Brand::create([
+            'name' => 'BrandYear',
+            'slug' => 'brand-year-filter',
+            'is_active' => true,
+        ]);
+        $vehicle = Vehicle::create([
+            'make' => 'Vw',
+            'model' => 'Golf Mk7',
+            'generation' => null,
+            'year_from' => 2012,
+            'year_to' => 2019,
+            'engine' => null,
+            'body_type' => null,
+        ]);
+        $product = Product::create([
+            'category_id' => $category->id,
+            'brand_id' => $brand->id,
+            'sku' => 'VP-YEAR-001',
+            'name' => 'Уникальная деталь Golf годовой фильтр',
+            'slug' => 'test-vp-year-001',
+            'price' => 10,
+            'is_active' => true,
+            'type' => 'part',
+        ]);
+        $product->vehicles()->attach($vehicle->id);
+
+        $base = [
+            'vehicleMake' => 'Vw',
+            'vehicleModel' => 'Golf Mk7',
+        ];
+
+        $this->get(route('vehicle.by_car', array_merge($base, ['vehicleYear' => 2015])))
+            ->assertOk()
+            ->assertSee('Уникальная деталь Golf годовой фильтр', false);
+
+        $this->get(route('vehicle.by_car', array_merge($base, ['vehicleYear' => 2005])))
+            ->assertOk()
+            ->assertDontSee('Уникальная деталь Golf годовой фильтр', false);
+    }
 }

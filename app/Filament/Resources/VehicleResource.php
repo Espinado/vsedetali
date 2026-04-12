@@ -40,13 +40,15 @@ class VehicleResource extends Resource
                 Forms\Components\TextInput::make('generation')
                     ->label('Поколение')
                     ->maxLength(100)
-                    ->nullable(),
+                    ->nullable()
+                    ->helperText('Разные поколения или несовместимые годы у одной модели — отдельные строки справочника (свои годы от/до). Дубликат той же комбинации марка+модель+поколение+годы система не сохранит.'),
                 Forms\Components\TextInput::make('year_from')
                     ->label('Год от')
                     ->numeric()
                     ->minValue(1900)
                     ->maxValue(2100)
-                    ->nullable(),
+                    ->nullable()
+                    ->helperText('Один год: одинаковые «год от» и «год до». Пустые годы — только если применимость без привязки к году (редко).'),
                 Forms\Components\TextInput::make('year_to')
                     ->label('Год до')
                     ->numeric()

@@ -74,14 +74,16 @@ class EditSellerProduct extends EditRecord
         $rows = $product->vehicles->map(fn (Vehicle $v): array => [
             'vehicle_make' => $v->make,
             'vehicle_model' => $v->model,
-            'compatibility_years' => SellerListingVehicleCompatibilities::formatVehicleYearsForInput($v),
+            'compatibility_years' => $v->discreteYearsCovered(),
+            'vehicle_row_ids' => [$v->id],
         ])->values()->all();
 
         $data['vehicle_compatibilities'] = $rows !== [] ? $rows : [
             [
                 'vehicle_make' => null,
                 'vehicle_model' => null,
-                'compatibility_years' => null,
+                'compatibility_years' => [],
+                'vehicle_row_ids' => [],
             ],
         ];
 
@@ -118,8 +120,10 @@ class EditSellerProduct extends EditRecord
                 'vehicle_compatibilities' => ['required', 'array', 'min:1'],
                 'vehicle_compatibilities.*.vehicle_make' => ['required', 'string', 'max:100'],
                 'vehicle_compatibilities.*.vehicle_model' => ['required', 'string', 'max:100'],
-                'vehicle_compatibilities.*.compatibility_years' => ['required', 'array', 'min:1'],
+                'vehicle_compatibilities.*.compatibility_years' => ['nullable', 'array'],
                 'vehicle_compatibilities.*.compatibility_years.*' => ['integer', 'min:1900', 'max:2100'],
+                'vehicle_compatibilities.*.vehicle_row_ids' => ['nullable', 'array'],
+                'vehicle_compatibilities.*.vehicle_row_ids.*' => ['integer', 'exists:vehicles,id'],
                 'listing_name' => ['required', 'string', 'max:500'],
                 'listing_images' => ['required', 'array', 'min:1', 'max:12'],
                 'listing_images.*' => ['required', 'string', 'max:500'],
@@ -133,6 +137,8 @@ class EditSellerProduct extends EditRecord
             $messages,
             $attributes
         )->validate();
+
+        SellerListingVehicleCompatibilities::assertSellerRowsHavePickOrYears($normalized);
 
         $name = trim((string) ($data['listing_name'] ?? ''));
         $images = array_values(array_filter($data['listing_images'] ?? []));
