@@ -13,6 +13,22 @@ class DiagnosePanelsCommand extends Command
 
     public function handle(): int
     {
+        $envPath = base_path('.env');
+
+        $this->line('Путь к .env: '.$envPath);
+        $this->line('Файл .env существует: '.(File::exists($envPath) ? 'да' : 'НЕТ'));
+        if (File::exists($envPath)) {
+            $raw = File::get($envPath);
+            if (str_starts_with($raw, "\xEF\xBB\xBF")) {
+                $this->warn('В начале .env обнаружен UTF-8 BOM — удалите BOM (пересохраните файл как UTF-8 без BOM), иначе первая переменная может не читаться.');
+            }
+            $this->line('--- разбор текста .env (до config) ---');
+            $this->scanEnvKeys($envPath, 'ADMIN_PANEL_DOMAIN');
+            $this->scanEnvKeys($envPath, 'SELLER_PANEL_DOMAIN');
+        }
+
+        $this->newLine();
+        $this->line('--- config() после Dotenv ---');
         $this->line('APP_URL raw: '.json_encode(config('app.url')));
         $this->line('panels.admin.domain: '.json_encode(config('panels.admin.domain')));
         $this->line('panels.seller.domain: '.json_encode(config('panels.seller.domain')));
@@ -39,9 +55,49 @@ class DiagnosePanelsCommand extends Command
         $this->line('Filament в bootstrap/providers.php: '.($filamentOk ? 'да' : 'нет'));
 
         $this->newLine();
-        $this->comment('Если panels.admin.domain пустой — проверьте .env рядом с artisan, синтаксис .env, затем: php artisan config:clear');
-        $this->comment('После правок не запускайте config:cache, пока не убедитесь, что значения верные (или удалите bootstrap/cache/config.php).');
+        if (! $panelsDedicated) {
+            $this->error('Домены панелей пустые: добавьте в .env две строки без пробелов вокруг = и без # в начале:');
+            $this->line('ADMIN_PANEL_DOMAIN=admin.vsedetalki.ru');
+            $this->line('SELLER_PANEL_DOMAIN=seller.vsedetalki.ru');
+            $this->line('Затем: php artisan config:clear');
+        } else {
+            $this->comment('Домены панелей заданы. После правок не запускайте config:cache с ошибочным .env (или удалите bootstrap/cache/config.php).');
+        }
 
         return self::SUCCESS;
+    }
+
+    private function scanEnvKeys(string $envPath, string $key): void
+    {
+        $content = File::get($envPath);
+        $content = preg_replace('/^\xEF\xBB\xBF/', '', $content) ?? $content;
+        $quotedKey = preg_quote($key, '/');
+        $found = false;
+
+        foreach (explode("\n", $content) as $idx => $line) {
+            $line = rtrim($line, "\r");
+            if (preg_match('/^\s*#\s*'.$quotedKey.'\s*=/', $line)) {
+                $found = true;
+                $this->line(sprintf(
+                    '  .env строка %d: %s [ЗАКОММЕНТИРОВАНА — уберите # в начале строки]',
+                    $idx + 1,
+                    mb_substr($line, 0, 120)
+                ));
+
+                continue;
+            }
+            if (preg_match('/^\s*'.$quotedKey.'\s*=/', $line)) {
+                $found = true;
+                $this->line(sprintf(
+                    '  .env строка %d: %s [активна]',
+                    $idx + 1,
+                    mb_substr($line, 0, 120)
+                ));
+            }
+        }
+
+        if (! $found) {
+            $this->warn("В файле .env нет строки «{$key}=...» (ни активной, ни с # в начале).");
+        }
     }
 }
