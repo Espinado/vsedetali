@@ -1,11 +1,15 @@
 /**
- * PWA: SW, баннер при beforeinstallprompt, скрытие после установки (в т.ч. из меню браузера).
+ * PWA: постоянная подсказка «из меню браузера» на каждом заходе + баннер при beforeinstallprompt.
+ * «Не сейчас» / «Скрыть» только на текущей странице. Установлено — localStorage pwa-installed.
  */
 (function () {
     'use strict';
 
     var STORAGE_INSTALLED = 'pwa-installed';
-    var STORAGE_DISMISSED = 'pwa-install-dismissed';
+
+    function isIos() {
+        return /iPhone|iPad|iPod/.test(navigator.userAgent || '');
+    }
 
     function hideBannerEl() {
         var el = document.getElementById('pwa-install-banner');
@@ -21,9 +25,27 @@
         }
     }
 
+    function hidePersistentHintEl() {
+        var el = document.getElementById('pwa-persistent-install-hint');
+        if (el) {
+            el.hidden = true;
+        }
+    }
+
+    function showPersistentHintEl() {
+        if (wasRecordedInstalled() || isIos()) {
+            return;
+        }
+        var el = document.getElementById('pwa-persistent-install-hint');
+        if (el) {
+            el.hidden = false;
+        }
+    }
+
     function hideAllInstallUi() {
         hideBannerEl();
         hideIosHintEl();
+        hidePersistentHintEl();
     }
 
     function markInstalled() {
@@ -31,14 +53,6 @@
             localStorage.setItem(STORAGE_INSTALLED, '1');
         } catch (e) {}
         hideAllInstallUi();
-    }
-
-    function dismissed() {
-        try {
-            return sessionStorage.getItem(STORAGE_DISMISSED) === '1';
-        } catch (e) {
-            return false;
-        }
     }
 
     function wasRecordedInstalled() {
@@ -62,8 +76,13 @@
         return false;
     }
 
+    try {
+        sessionStorage.removeItem('pwa-install-dismissed');
+    } catch (e) {}
+
     if (isStandalone() || wasRecordedInstalled()) {
         hideAllInstallUi();
+        return;
     }
 
     if ('serviceWorker' in navigator) {
@@ -74,20 +93,13 @@
         navigator.serviceWorker.register(swUrl, { scope: '/' }).catch(function () {});
     }
 
-    if (isStandalone() || wasRecordedInstalled()) {
-        return;
-    }
-
-    if (!('serviceWorker' in navigator)) {
-        return;
-    }
-
     var deferredPrompt = null;
 
     function showBanner() {
-        if (dismissed() || wasRecordedInstalled()) {
+        if (wasRecordedInstalled()) {
             return;
         }
+        hidePersistentHintEl();
         var el = document.getElementById('pwa-install-banner');
         if (!el) {
             return;
@@ -95,11 +107,13 @@
         el.hidden = false;
     }
 
-    window.addEventListener('beforeinstallprompt', function (e) {
-        e.preventDefault();
-        deferredPrompt = e;
-        showBanner();
-    });
+    if ('serviceWorker' in navigator) {
+        window.addEventListener('beforeinstallprompt', function (e) {
+            e.preventDefault();
+            deferredPrompt = e;
+            showBanner();
+        });
+    }
 
     window.addEventListener('appinstalled', function () {
         deferredPrompt = null;
@@ -131,12 +145,15 @@
                     deferredPrompt.userChoice.finally(function () {
                         deferredPrompt = null;
                         hideBannerEl();
+                        if (!wasRecordedInstalled() && !isIos()) {
+                            showPersistentHintEl();
+                        }
                     });
                 } else {
                     hideBannerEl();
-                    try {
-                        sessionStorage.setItem(STORAGE_DISMISSED, '1');
-                    } catch (err) {}
+                    if (!isIos()) {
+                        showPersistentHintEl();
+                    }
                 }
                 return;
             }
@@ -144,18 +161,27 @@
             if (dismissBtn) {
                 ev.preventDefault();
                 ev.stopPropagation();
-                hideAllInstallUi();
-                try {
-                    sessionStorage.setItem(STORAGE_DISMISSED, '1');
-                } catch (err) {}
+                hideBannerEl();
+                if (!isIos()) {
+                    showPersistentHintEl();
+                }
+                return;
+            }
+            var persistentDismiss = t.closest('#pwa-persistent-dismiss');
+            if (persistentDismiss) {
+                ev.preventDefault();
+                ev.stopPropagation();
+                hidePersistentHintEl();
             }
         },
         true,
     );
 
-    if (!dismissed() && !wasRecordedInstalled()) {
+    if (!isIos()) {
+        showPersistentHintEl();
+    } else {
         var iosHint = document.getElementById('pwa-ios-hint');
-        if (iosHint && /iPhone|iPad|iPod/.test(navigator.userAgent || '')) {
+        if (iosHint && !wasRecordedInstalled()) {
             iosHint.hidden = false;
         }
     }
