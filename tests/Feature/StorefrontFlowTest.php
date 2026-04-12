@@ -2,17 +2,19 @@
 
 namespace Tests\Feature;
 
-use App\Livewire\Storefront\AddToCartButton;
 use App\Livewire\Storefront\CheckoutWizard;
 use App\Models\Cart;
+use App\Models\Brand;
 use App\Models\Category;
 use App\Models\Order;
 use App\Models\OrderStatus;
 use App\Models\Product;
 use App\Models\User;
 use App\Services\CartService;
+use Illuminate\Foundation\Http\Middleware\ValidateCsrfToken;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Testing\TestResponse;
 use Livewire\Livewire;
 use Tests\TestCase;
 
@@ -40,17 +42,28 @@ class StorefrontFlowTest extends TestCase
             'password' => Hash::make('secret'),
         ]);
 
-        Livewire::test(AddToCartButton::class, ['product' => $product])
-            ->set('quantity', 2)
-            ->call('addToCart')
-            ->assertHasNoErrors();
+        // MakesHttpRequests не подставляет Set-Cookie из ответа в следующий запрос — без явной
+        // передачи session-cookie каждый вызов получает новый session_id и merge не находит корзину.
+        $this->withHeaders([
+            'X-Forwarded-Proto' => 'https',
+        ]);
+        $home = $this->get('/');
+        $home->assertOk();
+        $this->useSessionCookieFromResponse($home);
+
+        $seed = $this->get('/_testing/guest-cart-seed/'.$product->getKey());
+        $seed->assertOk();
+        $this->useSessionCookieFromResponse($seed);
 
         $this->assertDatabaseHas('cart_items', ['product_id' => $product->id, 'quantity' => 2]);
 
-        $this->post(route('login'), [
+        $this->withoutMiddleware(ValidateCsrfToken::class);
+        $login = $this->post('/login', [
             'email' => 'buyer@example.test',
             'password' => 'secret',
-        ])->assertRedirect();
+        ]);
+        $this->withMiddleware();
+        $login->assertRedirect(route('account.dashboard'));
 
         $this->assertAuthenticatedAs($user);
 
@@ -120,6 +133,14 @@ class StorefrontFlowTest extends TestCase
         $this->assertDatabaseCount('cart_items', 0);
     }
 
+    private function useSessionCookieFromResponse(TestResponse $response): void
+    {
+        $name = (string) config('session.cookie');
+        $cookie = $response->getCookie($name, false);
+        $this->assertNotNull($cookie, 'В ответе нет session-cookie «'.$name.'» — нельзя продолжить сценарий гостя.');
+        $this->withUnencryptedCookie($name, $cookie->getValue());
+    }
+
     private function createActiveProduct(): Product
     {
         $category = Category::create([
@@ -127,9 +148,15 @@ class StorefrontFlowTest extends TestCase
             'slug' => 'test-category',
             'is_active' => true,
         ]);
+        $brand = Brand::create([
+            'name' => 'Test brand',
+            'slug' => 'test-brand-storefront',
+            'is_active' => true,
+        ]);
 
         return Product::create([
             'category_id' => $category->id,
+            'brand_id' => $brand->id,
             'sku' => 'SKU-001',
             'name' => 'Test product',
             'slug' => 'test-product',

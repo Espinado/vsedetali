@@ -21,83 +21,101 @@
         @endif
     </nav>
 
-    <div class="flex flex-col lg:flex-row gap-8 lg:gap-12">
-        {{-- Галерея --}}
-        <div class="lg:w-1/2 shrink-0">
-            <div class="mb-4 aspect-square overflow-hidden rounded-2xl border border-orange-100/90 bg-stone-100 shadow-sm">
-                @if($product->images->isNotEmpty())
-                    <img src="{{ $product->images->first()->storage_url }}"
-                         alt="{{ $product->images->first()->alt ?? $product->name }}"
-                         class="w-full h-full object-contain"
-                         id="product-main-image">
-                @else
-                    <div class="w-full h-full flex items-center justify-center text-slate-400">Нет фото</div>
-                @endif
-            </div>
-            @if($product->images->count() > 1)
-                <div class="flex gap-2 overflow-x-auto pb-2 [-webkit-overflow-scrolling:touch]">
-                    @foreach($product->images as $image)
-                        <button type="button"
-                                class="h-16 w-16 min-h-[3.5rem] min-w-[3.5rem] shrink-0 overflow-hidden rounded-lg border-2 border-orange-100 transition hover:border-orange-300 focus:border-orange-500 focus:outline-none"
-                                onclick="document.getElementById('product-main-image').src = '{{ $image->storage_url }}'">
-                            <img src="{{ $image->storage_url }}" alt="" class="w-full h-full object-cover">
-                        </button>
-                    @endforeach
+    <div class="flex flex-col gap-8 lg:flex-row lg:items-start lg:gap-10 xl:gap-12">
+        @php
+            /** Главное фото: is_main, иначе первое по sort; миниатюры — в том же порядке (главное первым). */
+            $galleryImages = $product->images->sortBy(fn (\App\Models\ProductImage $i) => [$i->is_main ? 0 : 1, $i->sort]);
+        @endphp
+        {{-- Галерея + заказ под фото (компактнее половины экрана) --}}
+        <div class="w-full shrink-0 lg:max-w-[min(100%,22rem)] xl:max-w-sm">
+            <div class="mx-auto w-full max-w-sm lg:mx-0">
+                <div class="mb-3 aspect-square overflow-hidden rounded-2xl border border-orange-100/90 bg-stone-100 shadow-sm">
+                    @if($product->mainImage?->storage_url)
+                        <img src="{{ $product->mainImage->storage_url }}"
+                             alt="{{ $product->mainImage->alt ?? $product->name }}"
+                             class="h-full w-full object-contain"
+                             id="product-main-image">
+                    @else
+                        <div class="flex h-full w-full items-center justify-center text-slate-400">Нет фото</div>
+                    @endif
                 </div>
-            @endif
+                @if($galleryImages->count() > 1)
+                    <div class="flex gap-2 overflow-x-auto pb-2 [-webkit-overflow-scrolling:touch]">
+                        @foreach($galleryImages as $image)
+                            <button type="button"
+                                    class="h-14 w-14 min-h-[3.25rem] min-w-[3.25rem] shrink-0 overflow-hidden rounded-lg border-2 border-orange-100 transition hover:border-orange-300 focus:border-orange-500 focus:outline-none"
+                                    onclick="document.getElementById('product-main-image').src = '{{ $image->storage_url }}'">
+                                <img src="{{ $image->storage_url }}" alt="" class="h-full w-full object-cover">
+                            </button>
+                        @endforeach
+                    </div>
+                @endif
+                <div class="mt-4 space-y-3 rounded-xl border border-orange-100/90 bg-gradient-to-br from-orange-50/90 to-amber-50/50 p-4 shadow-sm ring-1 ring-orange-100/60">
+                    <p class="text-2xl font-bold tracking-tight text-orange-800 sm:text-3xl">
+                        {{ number_format($product->price, 2) }} {{ \App\Models\Setting::get('currency', 'RUB') }}
+                    </p>
+                    <p>
+                        @if($product->in_stock)
+                            <span class="inline-flex items-center rounded-full bg-emerald-50 px-3 py-1 text-sm font-semibold text-emerald-800 ring-1 ring-emerald-200/80">В наличии</span>
+                            @if($product->total_stock < 10)
+                                <span class="ml-2 text-sm text-stone-500">осталось {{ $product->total_stock }} шт.</span>
+                            @endif
+                        @else
+                            <span class="inline-flex items-center rounded-full bg-amber-50 px-3 py-1 text-sm font-semibold text-amber-900 ring-1 ring-amber-200/80">Под заказ</span>
+                        @endif
+                    </p>
+                    @livewire('storefront.add-to-cart-button', ['product' => $product])
+                </div>
+            </div>
         </div>
 
-        {{-- Инфо и корзина --}}
-        <div class="lg:w-1/2 min-w-0">
+        {{-- Описание товара --}}
+        <div class="min-w-0 flex-1">
             @if($product->brand)
                 <p class="text-sm text-slate-500 mb-1">{{ $product->brand->name }}</p>
             @endif
             <h1 class="mb-2 text-xl font-bold text-slate-900 sm:text-2xl">{{ $product->name }}</h1>
-            <p class="text-slate-600 mb-4">Артикул: <span class="font-mono">{{ $product->sku }}</span></p>
+            <p class="text-slate-600 mb-6">Артикул: <span class="font-mono">{{ $product->sku }}</span></p>
 
-            <p class="mb-2 text-3xl font-bold tracking-tight text-orange-800 sm:text-4xl">
-                {{ number_format($product->price, 2) }} {{ \App\Models\Setting::get('currency', 'RUB') }}
-            </p>
-            <p class="mb-6">
-                @if($product->in_stock)
-                    <span class="inline-flex items-center rounded-full bg-emerald-50 px-3 py-1 text-sm font-semibold text-emerald-800 ring-1 ring-emerald-200/80">В наличии</span>
-                    @if($product->total_stock < 10)
-                        <span class="ml-2 text-sm text-stone-500">осталось {{ $product->total_stock }} шт.</span>
-                    @endif
-                @else
-                    <span class="inline-flex items-center rounded-full bg-amber-50 px-3 py-1 text-sm font-semibold text-amber-900 ring-1 ring-amber-200/80">Под заказ</span>
-                @endif
-            </p>
-
-            @if($product->oemNumbers->isNotEmpty() || $crossAnalogItems->isNotEmpty() || $vehiclesCompatLinks->isNotEmpty())
+            {{-- Показ «Кратко»: при возврате OEM в блок добавить || $product->oemNumbers->isNotEmpty() в условие ниже --}}
+            @if($vehiclesCompatLinks->isNotEmpty())
                 <div class="mb-6 rounded-2xl border border-orange-100/90 bg-gradient-to-br from-orange-50/80 to-amber-50/40 p-4 shadow-sm">
                     <h2 class="text-sm font-semibold text-slate-800 mb-3">Кратко</h2>
 
                     <div class="space-y-2 text-sm">
+                        {{-- OEM в «Кратко» (временно скрыто)
                         @if($product->oemNumbers->isNotEmpty())
                             <div>
                                 <p class="text-slate-500 mb-1">OEM номера</p>
                                 <p class="font-mono text-slate-800">{{ $product->oemNumbers->take(5)->pluck('oem_number')->join(', ') }}</p>
                             </div>
                         @endif
-
-                        @if($crossAnalogItems->isNotEmpty())
-                            <div>
-                                <p class="text-slate-500 mb-1">Аналоги в каталоге</p>
-                                <p class="text-slate-700">
-                                    Найдено в каталоге: {{ $crossAnalogItems->count() }}
-                                    <a href="#analogs" class="text-slate-900 underline underline-offset-2">смотреть</a>
-                                </p>
-                            </div>
-                        @endif
+                        --}}
 
                         @if($vehiclesCompatLinks->isNotEmpty())
                             <div>
                                 <p class="text-slate-500 mb-1.5">Совместимость</p>
                                 <p class="text-slate-800 leading-relaxed text-[15px]">
                                     @foreach($vehiclesCompatLinks as $row)
+                                        @php
+                                            $v = $row['vehicle'];
+                                            $midYear = 0;
+                                            if ($v->year_from !== null && $v->year_to !== null) {
+                                                $midYear = (int) floor(((int) $v->year_from + (int) $v->year_to) / 2);
+                                            } elseif ($v->year_from !== null) {
+                                                $midYear = (int) $v->year_from;
+                                            } elseif ($v->year_to !== null) {
+                                                $midYear = (int) $v->year_to;
+                                            }
+                                            $byCarQuery = array_filter([
+                                                'vehicleId' => $v->id,
+                                                'vehicleMake' => trim((string) $v->make),
+                                                'vehicleModel' => trim((string) $v->model),
+                                                'vehicleYear' => $midYear > 0 ? $midYear : null,
+                                            ], fn ($x) => $x !== null && $x !== '');
+                                        @endphp
                                         @unless($loop->first)<span class="text-slate-400">, </span>@endunless
-                                        <a href="{{ route('home', ['vehicleId' => $row['vehicle']->id]) }}"
+                                        <a href="{{ route('vehicle.by_car', $byCarQuery) }}"
                                            class="text-slate-900 underline decoration-slate-300 hover:decoration-slate-700 underline-offset-2">
                                             {{ $row['label'] }}
                                         </a>
@@ -112,8 +130,6 @@
             @if($product->short_description)
                 <p class="text-slate-600 mb-6">{{ $product->short_description }}</p>
             @endif
-
-            @livewire('storefront.add-to-cart-button', ['product' => $product])
 
             @if($product->weight)
                 <p class="mt-6 text-sm text-slate-500">Вес: {{ number_format($product->weight, 2) }} кг</p>
@@ -131,63 +147,64 @@
         </section>
     @endif
 
-    {{-- Характеристики --}}
-    @if($product->attributes->isNotEmpty())
-        <section class="mt-12 pt-8 border-t border-slate-200">
-            <h2 class="text-lg font-semibold text-slate-800 mb-4">Характеристики</h2>
-            <dl class="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-2">
-                @foreach($product->attributes as $attr)
-                    <dt class="text-slate-500">{{ $attr->name }}</dt>
-                    <dd class="text-slate-800">{{ $attr->value }}</dd>
-                @endforeach
-            </dl>
-        </section>
-    @endif
-
-    {{-- OEM номера (полный список) --}}
+    {{-- OEM номера (полный список) — временно скрыто
     @if($product->oemNumbers->isNotEmpty())
         <section class="mt-12 pt-8 border-t border-slate-200">
             <h2 class="text-lg font-semibold text-slate-800 mb-4">OEM номера</h2>
             <p class="text-slate-600 font-mono text-sm">{{ $product->oemNumbers->pluck('oem_number')->join(', ') }}</p>
         </section>
     @endif
+    --}}
 
-    {{-- Аналоги: номер + ссылка на товар в магазине --}}
+    {{-- Аналоги: карточки одного размера с превью --}}
     @if($crossAnalogItems->isNotEmpty())
         <section id="analogs" class="mt-12 pt-8 border-t border-slate-200 scroll-mt-8">
-            <h2 class="text-lg font-semibold text-slate-800 mb-4">Аналоги других производителей</h2>
-            <p class="text-sm text-slate-500 mb-4">Показываются только аналоги, которые есть в нашем каталоге как отдельные товары (совпадение номера).</p>
-            <div class="-mx-1 overflow-x-auto rounded-lg border border-slate-200 sm:mx-0 [-webkit-overflow-scrolling:touch]">
-                <table class="min-w-[32rem] w-full text-left text-sm sm:min-w-full">
-                    <thead class="bg-slate-50 text-slate-600 font-medium border-b border-slate-200">
-                        <tr>
-                            <th class="px-4 py-3">Производитель аналога</th>
-                            <th class="px-4 py-3">Номер аналога</th>
-                            <th class="px-4 py-3">Товар</th>
-                            <th class="px-4 py-3 min-w-[12rem]">Корзина</th>
-                        </tr>
-                    </thead>
-                    <tbody class="divide-y divide-slate-100">
-                        @foreach($crossAnalogItems as $item)
-                            <tr class="hover:bg-slate-50/80 align-top">
-                                <td class="px-4 py-3 text-slate-800">{{ $item->cross->manufacturer_name ?: '—' }}</td>
-                                <td class="px-4 py-3 font-mono text-slate-900">{{ $item->cross->cross_number }}</td>
-                                <td class="px-4 py-3">
-                                    <a href="{{ route('product.show', $item->linked) }}" class="text-slate-900 font-medium hover:underline">
-                                        {{ $item->linked->name }}
-                                    </a>
-                                    @if($item->linked->brand)
-                                        <span class="text-slate-500 text-sm"> — {{ $item->linked->brand->name }}</span>
-                                    @endif
-                                    <span class="block text-xs text-slate-400 font-mono mt-0.5">{{ $item->linked->sku }}</span>
-                                </td>
-                                <td class="px-4 py-3">
-                                    @livewire('storefront.add-to-cart-button', ['product' => $item->linked, 'compact' => true], key('product-show-analog-'.$item->linked->id))
-                                </td>
-                            </tr>
-                        @endforeach
-                    </tbody>
-                </table>
+            <h2 class="text-lg font-semibold text-slate-800 mb-2">Аналоги других производителей</h2>
+            <p class="text-sm text-slate-500 mb-6">Показываются только аналоги, которые есть в нашем каталоге как отдельные товары (совпадение номера).</p>
+            <div class="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+                @foreach($crossAnalogItems as $item)
+                    <article class="flex h-full min-h-[22rem] flex-col overflow-hidden rounded-xl border border-slate-200/90 bg-white shadow-sm ring-1 ring-slate-100/80 transition hover:border-orange-200/80 hover:shadow-md">
+                        <a href="{{ route('product.show', $item->linked) }}" class="block shrink-0 focus:outline-none focus-visible:ring-2 focus-visible:ring-orange-500 focus-visible:ring-offset-2">
+                            <div class="flex aspect-[5/4] items-center justify-center bg-stone-50">
+                                @if($item->linked->mainImage?->storage_url)
+                                    <img src="{{ $item->linked->mainImage->storage_url }}"
+                                         alt="{{ $item->linked->mainImage->alt ?? $item->linked->name }}"
+                                         class="max-h-full max-w-full object-contain p-3"
+                                         loading="lazy"
+                                         width="200"
+                                         height="160">
+                                @else
+                                    <span class="px-4 text-center text-xs text-slate-400">Нет фото</span>
+                                @endif
+                            </div>
+                        </a>
+                        <div class="flex min-h-0 flex-1 flex-col gap-2 border-t border-slate-100 p-4">
+                            <div class="text-xs text-slate-500">
+                                <span class="font-medium text-slate-700">{{ $item->cross->manufacturer_name ?: 'Аналог' }}</span>
+                                <span class="mx-1 text-slate-300">·</span>
+                                <span class="font-mono text-slate-800">{{ $item->cross->cross_number }}</span>
+                            </div>
+                            <a href="{{ route('product.show', $item->linked) }}" class="line-clamp-2 min-h-[2.5rem] text-sm font-semibold leading-snug text-slate-900 hover:text-orange-800">
+                                {{ $item->linked->name }}
+                            </a>
+                            @if($item->linked->brand)
+                                <p class="text-xs text-slate-500">{{ $item->linked->brand->name }}</p>
+                            @endif
+                            <p class="font-mono text-[11px] text-slate-400">{{ $item->linked->sku }}</p>
+                            <p class="mt-auto pt-2 text-lg font-bold text-orange-800">
+                                {{ number_format($item->linked->price, 2) }} {{ \App\Models\Setting::get('currency', 'RUB') }}
+                            </p>
+                            @if($item->linked->in_stock)
+                                <p class="text-xs font-medium text-emerald-700">В наличии</p>
+                            @else
+                                <p class="text-xs font-medium text-amber-800">Под заказ</p>
+                            @endif
+                            <div class="pt-2">
+                                @livewire('storefront.add-to-cart-button', ['product' => $item->linked, 'compact' => true], key('product-show-analog-'.$item->linked->id))
+                            </div>
+                        </div>
+                    </article>
+                @endforeach
             </div>
         </section>
     @endif

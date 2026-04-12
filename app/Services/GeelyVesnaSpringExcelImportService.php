@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Models\Brand;
 use App\Models\Category;
 use App\Models\Product;
+use App\Support\ProductCatalogSlug;
 use App\Models\Stock;
 use App\Models\Vehicle;
 use App\Models\Warehouse;
@@ -198,7 +199,6 @@ class GeelyVesnaSpringExcelImportService
                 if ($product === null) {
                     $product = new Product;
                     $product->sku = $sku;
-                    $product->slug = $this->uniqueProductSlug($sku);
                     $product->category_id = $currentLeafCategory->id;
                     $product->brand_id = $brand->id;
                     $product->price = 0;
@@ -214,6 +214,11 @@ class GeelyVesnaSpringExcelImportService
 
                 $product->name = $productName;
                 $product->brand_id = $brand->id;
+                $product->slug = ProductCatalogSlug::unique(
+                    $productName,
+                    $brand->name,
+                    $product->exists ? $product->id : null
+                );
                 $product->save();
 
                 $oemForPivot = Str::limit(explode('/', $article)[0], 100, '');
@@ -374,20 +379,4 @@ class GeelyVesnaSpringExcelImportService
         }
     }
 
-    protected function uniqueProductSlug(string $sku): string
-    {
-        $base = Str::slug(Str::limit($sku, 80, ''));
-        if ($base === '') {
-            $base = 'p-'.Str::lower(Str::random(8));
-        }
-
-        $slug = $base;
-        $n = 0;
-
-        while (Product::query()->where('slug', $slug)->exists()) {
-            $slug = $base.'-'.(++$n);
-        }
-
-        return Str::limit($slug, 500, '');
-    }
 }

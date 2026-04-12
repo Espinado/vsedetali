@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\AuthController;
+use App\Http\Controllers\FilamentSessionLoginController;
 use App\Http\Middleware\RedirectPanelSubdomainsFromStorefront;
 use App\Http\Controllers\PwaManifestController;
 use App\Http\Controllers\PwaServiceWorkerController;
@@ -13,6 +14,7 @@ use App\Models\Order;
 use App\Models\Page;
 use App\Models\Product;
 use App\Models\Setting;
+use App\Models\Vehicle;
 use App\Support\Seo;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Route;
@@ -68,6 +70,8 @@ $sellerPanelDomain = config('panels.seller.domain');
 if (filled($adminPanelDomain)) {
     Route::domain($adminPanelDomain)->group(function () use ($inviteThrottle, $registerStaffInviteRoutes) {
         Route::middleware($inviteThrottle)->group($registerStaffInviteRoutes);
+        // POST /login: fallback, если форма Filament ушла не в Livewire (иначе 405 на поддомене панели).
+        Route::post('/login', [FilamentSessionLoginController::class, 'admin'])->middleware('throttle:12,1');
     });
 } else {
     Route::middleware($inviteThrottle)->group($registerStaffInviteRoutes);
@@ -76,6 +80,7 @@ if (filled($adminPanelDomain)) {
 if (filled($sellerPanelDomain)) {
     Route::domain($sellerPanelDomain)->group(function () use ($inviteThrottle, $registerSellerInviteRoutes) {
         Route::middleware($inviteThrottle)->group($registerSellerInviteRoutes);
+        Route::post('/login', [FilamentSessionLoginController::class, 'seller'])->middleware('throttle:12,1');
     });
 } else {
     Route::middleware($inviteThrottle)->group($registerSellerInviteRoutes);
@@ -114,6 +119,14 @@ $registerStorefrontRoutes = function () use ($panelsUseDedicatedHosts): void {
     })->name('robots');
 
     Route::get('/', function () {
+        $vehicleId = (int) request()->query('vehicleId', 0);
+        if ($vehicleId > 0) {
+            $vehicle = Vehicle::query()->find($vehicleId);
+            if ($vehicle !== null) {
+                return redirect()->route('vehicle.parts', $vehicle, 302);
+            }
+        }
+
         $banners = Banner::active()->get();
         $featuredProducts = Product::with(['category', 'brand', 'images', 'stocks'])->active()->latest()->take(8)->get();
         $metaDescription = trim((string) (Setting::get('site_meta_description') ?? ''));
@@ -128,6 +141,13 @@ $registerStorefrontRoutes = function () use ($panelsUseDedicatedHosts): void {
             'canonicalUrl' => url('/'),
         ]);
     })->name('home');
+
+    Route::get('/vehicle/{vehicle}', \App\Livewire\Storefront\ProductGrid::class)
+        ->name('vehicle.parts');
+
+    /** Подбор по марке/модели/году и id ТС (query); канонический URL — vehicle.parts */
+    Route::get('/parts/by-car', \App\Livewire\Storefront\ProductGrid::class)
+        ->name('vehicle.by_car');
 
     Route::get('/catalog/{categorySlug?}', function () {
         return redirect()->route('home', request()->query(), 301);
@@ -182,6 +202,15 @@ $registerStorefrontRoutes = function () use ($panelsUseDedicatedHosts): void {
         Route::put('/profile', [\App\Http\Controllers\Account\ProfileController::class, 'update'])->name('profile.update');
         Route::resource('addresses', \App\Http\Controllers\Account\AddressController::class)->except(['show']);
     });
+
+    if (app()->environment('testing')) {
+        // Только phpunit: тот же домен/сессия, что и у витрины (см. StorefrontFlowTest — merge при логине).
+        Route::get('/_testing/guest-cart-seed/{product}', function (Product $product) {
+            app(\App\Services\CartService::class)->addItem($product, 2);
+
+            return response('ok', 200);
+        })->name('testing.guest-cart-seed');
+    }
 };
 
 if ($panelsUseDedicatedHosts && $storefrontHost !== '') {

@@ -132,16 +132,35 @@ class Product extends Model
     /**
      * Кросс-номера, по которым в каталоге есть другой товар (совпадение SKU). Без карточки — не попадают в выдачу.
      *
+     * Если у этого товара задана совместимость с авто, в список попадают только товары с пересечением по ТС.
+     * Так отсекаются ложные совпадения по номеру (например сайлентблок и рычаг из одной цепочки OEM).
+     *
      * @return \Illuminate\Support\Collection<int, object{cross: \App\Models\ProductCrossNumber, linked: \App\Models\Product}>
      */
     public function crossNumbersWithLinkedProducts(): \Illuminate\Support\Collection
     {
+        $sourceVehicleIds = $this->relationLoaded('vehicles')
+            ? $this->vehicles->pluck('id')->unique()->values()
+            : $this->vehicles()->pluck('id')->unique()->values();
+
         return $this->crossNumbers
-            ->map(function (ProductCrossNumber $cn) {
+            ->map(function (ProductCrossNumber $cn) use ($sourceVehicleIds) {
                 $linked = static::query()
                     ->where('is_active', true)
                     ->where('id', '!=', $this->id)
                     ->whereSkuMatchesPartNumber($cn->cross_number)
+                    ->when(
+                        $sourceVehicleIds->isNotEmpty(),
+                        fn ($q) => $q->whereHas(
+                            'vehicles',
+                            fn ($q2) => $q2->whereKey($sourceVehicleIds)
+                        )
+                    )
+                    ->with([
+                        'brand',
+                        'images' => fn ($q) => $q->orderBy('sort'),
+                        'stocks',
+                    ])
                     ->first();
 
                 if ($linked === null) {
@@ -185,9 +204,13 @@ class Product extends Model
                 if ($tail === null || $tail === '') {
                     continue;
                 }
-                $out[] = VehicleLabelNormalizer::title(trim($make.' '.$tail));
+                $out[] = VehicleLabelNormalizer::title(trim($make.' '.$tail)).$v->storefrontYearRangeSuffix();
             } else {
-                $out[] = trim($make.' '.$model);
+                $base = trim($make.' '.$model);
+                if ($v->generation !== null && trim((string) $v->generation) !== '') {
+                    $base = trim($base.' '.trim((string) $v->generation));
+                }
+                $out[] = $base.$v->storefrontYearRangeSuffix();
             }
         }
 
@@ -234,11 +257,7 @@ class Product extends Model
             }
         }
 
-        if ($vehicle->year_from !== null || $vehicle->year_to !== null) {
-            $y1 = $vehicle->year_from ?? '…';
-            $y2 = $vehicle->year_to ?? '…';
-            $name .= ' ('.$y1.'–'.$y2.')';
-        }
+        $name .= $vehicle->storefrontYearRangeSuffix();
 
         $detailParts = array_values(array_filter([
             $vehicle->body_type !== null && trim((string) $vehicle->body_type) !== ''
@@ -256,8 +275,34 @@ class Product extends Model
         return $name;
     }
 
+    /**
+     * Синхронизирует связи в product_vehicle; для записей, которые уже были привязаны, сохраняет OEM в pivot.
+     *
+     * @param  iterable<int|string>  $vehicleIds
+     */
+    public function syncVehiclesByIdsPreservingOem(iterable $vehicleIds): void
+    {
+        $ids = collect($vehicleIds)->map(fn ($id): int => (int) $id)->unique()->values();
+        $existing = $this->vehicles()->get()->keyBy('id');
+        $sync = [];
+        foreach ($ids as $id) {
+            $pivot = $existing->get($id)?->pivot;
+            $oem = $pivot && isset($pivot->oem_number) && $pivot->oem_number !== null && trim((string) $pivot->oem_number) !== ''
+                ? trim((string) $pivot->oem_number)
+                : null;
+            $sync[$id] = ['oem_number' => $oem];
+        }
+        $this->vehicles()->sync($sync);
+    }
+
     public function getMainImageAttribute(): ?ProductImage
     {
+        if ($this->relationLoaded('images')) {
+            $main = $this->images->firstWhere('is_main', true);
+
+            return $main ?? $this->images->sortBy('sort')->first();
+        }
+
         return $this->images()->where('is_main', true)->first()
             ?? $this->images()->orderBy('sort')->first();
     }

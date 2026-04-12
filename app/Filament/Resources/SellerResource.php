@@ -76,14 +76,8 @@ class SellerResource extends Resource
                         Forms\Components\TextInput::make('name')
                             ->label('Название')
                             ->required()
-                            ->maxLength(255),
-                        Forms\Components\TextInput::make('slug')
-                            ->label('Код (slug)')
-                            ->required()
                             ->maxLength(255)
-                            ->unique(ignoreRecord: true)
-                            ->helperText('При создании формируется из названия автоматически.')
-                            ->visibleOn('edit'),
+                            ->helperText('Идентификатор компании в ссылках подставляется автоматически из названия.'),
                         Forms\Components\DatePicker::make('contract_date')
                             ->label('Дата договора')
                             ->required()
@@ -145,9 +139,6 @@ class SellerResource extends Resource
                     ->label('Название')
                     ->searchable()
                     ->sortable(),
-                Tables\Columns\TextColumn::make('slug')
-                    ->label('Slug')
-                    ->toggleable(isToggledHiddenByDefault: true),
                 Tables\Columns\TextColumn::make('contract_date')
                     ->label('Договор')
                     ->date()

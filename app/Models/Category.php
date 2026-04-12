@@ -12,6 +12,20 @@ class Category extends Model
 {
     use HasFactory;
 
+    /**
+     * Категория для товаров с модерации продавцов ({@see \App\Services\SellerSubmittedProductService}).
+     */
+    public const MARKETPLACE_MODERATION_SLUG = 'seller-marketplace';
+
+    /**
+     * Slug нельзя менять автогенерацией из админки (связаны с кодом).
+     *
+     * @var list<string>
+     */
+    public const LOCKED_SLUGS = [
+        self::MARKETPLACE_MODERATION_SLUG,
+    ];
+
     protected $fillable = [
         'parent_id',
         'name',

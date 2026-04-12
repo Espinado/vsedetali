@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Models\Brand;
 use App\Models\Category;
+use App\Support\ProductCatalogSlug;
 use App\Support\VehicleLabelNormalizer;
 use App\Models\Product;
 use App\Models\Stock;
@@ -178,7 +179,6 @@ class GeelyBambooImportService
                     if ($product === null) {
                         $product = new Product;
                         $product->sku = $sku;
-                        $product->slug = $this->uniqueProductSlug($sku);
                         $product->category_id = $importCategory->id;
                         $product->brand_id = $brand->id;
                         $product->price = 0;
@@ -194,6 +194,11 @@ class GeelyBambooImportService
 
                     $product->name = $name;
                     $product->brand_id = $brand->id;
+                    $product->slug = ProductCatalogSlug::unique(
+                        $name,
+                        $brand->name,
+                        $product->exists ? $product->id : null
+                    );
                     $product->save();
 
                     $oemForPivot = Str::limit(explode('/', $oem)[0], 100, '');
@@ -222,23 +227,6 @@ class GeelyBambooImportService
         }
 
         return $stats;
-    }
-
-    private function uniqueProductSlug(string $sku): string
-    {
-        $base = Str::slug(Str::limit($sku, 80, ''));
-        if ($base === '') {
-            $base = 'p-'.Str::lower(Str::random(8));
-        }
-
-        $slug = $base;
-        $n = 0;
-
-        while (Product::query()->where('slug', $slug)->exists()) {
-            $slug = $base.'-'.(++$n);
-        }
-
-        return Str::limit($slug, 500, '');
     }
 
     /**

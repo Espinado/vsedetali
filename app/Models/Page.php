@@ -9,6 +9,13 @@ class Page extends Model
 {
     use HasFactory;
 
+    /**
+     * Slug зашит во витрине (меню, ссылки). При правке страницы URL не пересобирается из заголовка.
+     *
+     * @var list<string>
+     */
+    public const LOCKED_SLUGS = ['contacts', 'delivery', 'payment'];
+
     protected $fillable = [
         'title',
         'meta_title',

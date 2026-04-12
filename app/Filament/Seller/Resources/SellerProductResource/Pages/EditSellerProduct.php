@@ -8,6 +8,7 @@ use App\Models\ProductImage;
 use App\Models\SellerStaff;
 use App\Models\Vehicle;
 use App\Models\Warehouse;
+use App\Support\ProductCatalogSlug;
 use App\Support\SellerListingVehicleCompatibilities;
 use Filament\Actions;
 use Filament\Actions\DeleteAction;
@@ -22,7 +23,7 @@ class EditSellerProduct extends EditRecord
     protected static string $resource = SellerProductResource::class;
 
     /**
-     * @var array{name: string, images: list<string>, vehicle_ids: array<int>}|null
+     * @var array{name: string, images: list<string>, vehicle_ids: array<int>, slug: string}|null
      */
     protected ?array $catalogUpdatePayload = null;
 
@@ -137,10 +138,15 @@ class EditSellerProduct extends EditRecord
         $images = array_values(array_filter($data['listing_images'] ?? []));
         $vehicleIds = SellerListingVehicleCompatibilities::collectVehicleIds($normalized)->all();
 
+        $product = $this->record->product;
+        $product?->loadMissing('brand');
+        $brandName = $product?->brand?->name;
+
         $this->catalogUpdatePayload = [
             'name' => $name,
             'images' => $images,
             'vehicle_ids' => $vehicleIds,
+            'slug' => ProductCatalogSlug::unique($name, $brandName !== null && $brandName !== '' ? $brandName : null, $product?->id),
         ];
 
         unset($data['vehicle_compatibilities'], $data['listing_name'], $data['listing_images']);
@@ -169,7 +175,10 @@ class EditSellerProduct extends EditRecord
             $record->update($data);
 
             if ($catalog !== null && ($product = $record->product)) {
-                $product->update(['name' => $catalog['name']]);
+                $product->update([
+                    'name' => $catalog['name'],
+                    'slug' => $catalog['slug'],
+                ]);
                 $product->vehicles()->sync($catalog['vehicle_ids']);
                 $product->images()->delete();
                 foreach ($catalog['images'] as $i => $path) {

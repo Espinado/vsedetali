@@ -36,10 +36,8 @@ class CategoryResource extends Resource
                     ->searchable(),
                 Forms\Components\TextInput::make('name')
                     ->required()
-                    ->maxLength(255),
-                Forms\Components\TextInput::make('slug')
                     ->maxLength(255)
-                    ->nullable(),
+                    ->helperText('Адрес раздела в каталоге подставляется автоматически из названия.'),
                 Forms\Components\Textarea::make('description')
                     ->columnSpanFull(),
                 Forms\Components\Section::make('SEO')
@@ -70,7 +68,6 @@ class CategoryResource extends Resource
         return $table
             ->columns([
                 Tables\Columns\TextColumn::make('name')->searchable()->sortable(),
-                Tables\Columns\TextColumn::make('slug')->searchable(),
                 Tables\Columns\TextColumn::make('parent.name')->label('Родитель')->sortable(),
                 Tables\Columns\TextColumn::make('sort')->sortable(),
                 Tables\Columns\IconColumn::make('is_active')->boolean()->sortable(),

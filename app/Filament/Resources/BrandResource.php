@@ -31,10 +31,8 @@ class BrandResource extends Resource
             ->schema([
                 Forms\Components\TextInput::make('name')
                     ->required()
-                    ->maxLength(255),
-                Forms\Components\TextInput::make('slug')
                     ->maxLength(255)
-                    ->nullable(),
+                    ->helperText('Адрес в каталоге подставляется автоматически из названия.'),
                 Forms\Components\TextInput::make('logo')
                     ->maxLength(500)
                     ->nullable()
@@ -49,7 +47,6 @@ class BrandResource extends Resource
         return $table
             ->columns([
                 Tables\Columns\TextColumn::make('name')->searchable()->sortable(),
-                Tables\Columns\TextColumn::make('slug')->searchable(),
                 Tables\Columns\TextColumn::make('products_count')->counts('products')->label('Товаров'),
                 Tables\Columns\IconColumn::make('is_active')->boolean()->sortable(),
             ])

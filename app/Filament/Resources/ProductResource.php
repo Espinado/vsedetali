@@ -3,6 +3,7 @@
 namespace App\Filament\Resources;
 
 use App\Filament\Concerns\AuthorizesCatalogResource;
+use App\Filament\Forms\VehicleCompatibilityRepeater;
 use App\Filament\Resources\ProductResource\Pages;
 use App\Filament\Support\FilamentSweetAlert;
 use App\Models\Product;
@@ -44,8 +45,8 @@ class ProductResource extends Resource
                 Forms\Components\Select::make('brand_id')
                     ->relationship('brand', 'name')
                     ->searchable()
-                    ->nullable()
-                    ->label('Бренд'),
+                    ->required()
+                    ->label('Бренд детали'),
                 Forms\Components\TextInput::make('code')
                     ->label('Код')
                     ->maxLength(50)
@@ -57,13 +58,34 @@ class ProductResource extends Resource
                 Forms\Components\TextInput::make('name')
                     ->label('Наименование')
                     ->required()
-                    ->maxLength(255),
-                Forms\Components\TextInput::make('slug')
                     ->maxLength(255)
-                    ->nullable(),
+                    ->helperText('Адрес карточки на витрине подставляется автоматически из бренда и наименования.'),
                 Forms\Components\Textarea::make('short_description')
                     ->columnSpanFull(),
                 Forms\Components\RichEditor::make('description')
+                    ->columnSpanFull(),
+                Forms\Components\Section::make('Совместимость с авто')
+                    ->description('Марка, модель и годы выпуска — из справочника «Автомобили». Несколько строк: разные марки/модели или разные годы. OEM по строкам можно уточнить во вкладке «Совместимость с автомобилями».')
+                    ->schema([
+                        VehicleCompatibilityRepeater::make()
+                            ->columnSpanFull(),
+                    ])
+                    ->columnSpanFull(),
+                Forms\Components\Section::make('Фотографии')
+                    ->description('Хотя бы одно фото. Несколько файлов — порядок как на витрине (первое — главное).')
+                    ->schema([
+                        Forms\Components\FileUpload::make('product_gallery')
+                            ->label('Изображения')
+                            ->image()
+                            ->multiple()
+                            ->reorderable()
+                            ->maxFiles(12)
+                            ->disk('public')
+                            ->directory('products')
+                            ->visibility('public')
+                            ->required()
+                            ->columnSpanFull(),
+                    ])
                     ->columnSpanFull(),
                 Forms\Components\Section::make('SEO')
                     ->schema([
@@ -135,7 +157,6 @@ class ProductResource extends Resource
             ProductResource\RelationManagers\ProductAttributesRelationManager::class,
             ProductResource\RelationManagers\StocksRelationManager::class,
             ProductResource\RelationManagers\ProductVehiclesRelationManager::class,
-            ProductResource\RelationManagers\ImagesRelationManager::class,
         ];
     }
 

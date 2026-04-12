@@ -7,6 +7,7 @@ use App\Models\Product;
 use App\Models\Stock;
 use App\Models\Vehicle;
 use App\Models\Warehouse;
+use App\Support\ProductCatalogSlug;
 use App\Support\VehicleLabelNormalizer;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
@@ -184,7 +185,6 @@ class RemainsStockCsvImportService
 
                 $product = new Product;
                 $product->sku = $sku;
-                $product->slug = $this->uniqueProductSlug($sku);
                 $product->category_id = null;
                 $product->is_active = true;
                 $product->type = 'part';
@@ -198,12 +198,18 @@ class RemainsStockCsvImportService
                 }
 
                 if ($this->context['standalone']) {
-                    $product->brand_id = null;
+                    $product->brand_id = Brand::platformUnknownFallback()->id;
                 } elseif ($this->context['part_brand_id'] !== null) {
                     $product->brand_id = $this->context['part_brand_id'];
                 } else {
-                    $product->brand_id = null;
+                    $product->brand_id = Brand::platformUnknownFallback()->id;
                 }
+
+                $brandName = Brand::query()->whereKey($product->brand_id)->value('name');
+                $product->slug = ProductCatalogSlug::unique(
+                    (string) $product->name,
+                    $brandName !== null ? (string) $brandName : null
+                );
 
                 $product->save();
                 $stats['created_products']++;
@@ -540,20 +546,4 @@ class RemainsStockCsvImportService
         return (int) round($f);
     }
 
-    private function uniqueProductSlug(string $sku): string
-    {
-        $base = Str::slug(Str::limit($sku, 80, ''));
-        if ($base === '') {
-            $base = 'p-'.Str::lower(Str::random(8));
-        }
-
-        $slug = $base;
-        $n = 0;
-
-        while (Product::query()->where('slug', $slug)->exists()) {
-            $slug = $base.'-'.(++$n);
-        }
-
-        return Str::limit($slug, 500, '');
-    }
 }

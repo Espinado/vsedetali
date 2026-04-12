@@ -54,6 +54,12 @@ class ProductGrid extends Component
     /** Число товаров на странице каталога */
     public int $perPage = 12;
 
+    /** Страница открыта как /vehicle/{id} — подбор по авто зафиксирован */
+    public bool $vehiclePageContext = false;
+
+    /** Подпись авто (как в справочнике ТС), для заголовка и чипов */
+    public string $vehicleLockLabel = '';
+
     protected $queryString = [
         'categorySlug' => ['except' => ''],
         'brandId'      => ['except' => 0],
@@ -81,33 +87,56 @@ class ProductGrid extends Component
         ];
     }
 
-    public function mount(?string $categorySlug = null): void
+    public function mount(?string $categorySlug = null, ?Vehicle $vehicle = null): void
     {
         $this->perPage = $this->normalizePerPage((int) $this->perPage);
 
+        if ($vehicle !== null) {
+            $this->vehiclePageContext = true;
+            $this->vehicleId = $vehicle->id;
+            $label = $vehicle->shortCompatibilityLabel();
+            $this->vehicleLockLabel = $label !== '' ? $label : '';
+            $this->applyVehicleToSelectors($vehicle);
+        }
+
         if ($this->isCatalogHiddenCategorySlug($categorySlug)) {
-            $this->redirect(route('catalog'), navigate: true);
+            if ($vehicle !== null) {
+                $this->redirect(route('vehicle.parts', ['vehicle' => $vehicle->id]), navigate: true);
+            } else {
+                $this->redirect(route('catalog'), navigate: true);
+            }
 
             return;
         }
 
         $this->categorySlug = $categorySlug;
 
-        if ($this->vehicleId > 0) {
-            $vehicle = Vehicle::query()->find($this->vehicleId);
-            if ($vehicle) {
-                $this->vehicleMake = (string) $vehicle->make;
-                $this->vehicleModel = (string) $vehicle->model;
-                if ($vehicle->year_from !== null && $vehicle->year_to !== null) {
-                    $this->vehicleYear = (int) floor(($vehicle->year_from + $vehicle->year_to) / 2);
-                } elseif ($vehicle->year_from !== null) {
-                    $this->vehicleYear = (int) $vehicle->year_from;
-                } elseif ($vehicle->year_to !== null) {
-                    $this->vehicleYear = (int) $vehicle->year_to;
-                }
+        if ($vehicle === null && $this->vehicleId > 0) {
+            $found = Vehicle::query()->find($this->vehicleId);
+            if ($found) {
+                $this->vehiclePageContext = true;
+                $this->applyVehicleToSelectors($found);
+                $label = $found->shortCompatibilityLabel();
+                $this->vehicleLockLabel = $label !== '' ? $label : '';
             } else {
                 $this->vehicleId = 0;
+                $this->vehicleLockLabel = '';
             }
+        }
+    }
+
+    private function applyVehicleToSelectors(Vehicle $vehicle): void
+    {
+        $this->vehicleMake = (string) $vehicle->make;
+        $this->vehicleModel = (string) $vehicle->model;
+        if ($vehicle->year_from !== null && $vehicle->year_to !== null) {
+            $this->vehicleYear = (int) floor(($vehicle->year_from + $vehicle->year_to) / 2);
+        } elseif ($vehicle->year_from !== null) {
+            $this->vehicleYear = (int) $vehicle->year_from;
+        } elseif ($vehicle->year_to !== null) {
+            $this->vehicleYear = (int) $vehicle->year_to;
+        } else {
+            $this->vehicleYear = 0;
         }
     }
 
@@ -291,6 +320,10 @@ class ProductGrid extends Component
 
     public function getSelectedVehicleLabelProperty(): ?string
     {
+        if ($this->vehicleLockLabel !== '') {
+            return $this->vehicleLockLabel;
+        }
+
         if ($this->vehicleMake === '') {
             return null;
         }
@@ -488,13 +521,16 @@ class ProductGrid extends Component
         $this->brandId = 0;
         $this->search = '';
         $this->sort = 'name_asc';
-        $this->vehicleMake = '';
-        $this->vehicleModel = '';
-        $this->vehicleYear = 0;
-        $this->vehicleId = 0;
         $this->priceFrom = '';
         $this->priceTo = '';
         $this->inStockOnly = false;
+        if (! $this->vehiclePageContext) {
+            $this->vehicleMake = '';
+            $this->vehicleModel = '';
+            $this->vehicleYear = 0;
+            $this->vehicleId = 0;
+            $this->vehicleLockLabel = '';
+        }
         $this->resetPage();
     }
 
@@ -502,6 +538,10 @@ class ProductGrid extends Component
     {
         if ($this->brandId > 0 && ! $this->brandsInCategory->contains('id', $this->brandId)) {
             $this->brandId = 0;
+        }
+
+        if ($this->vehiclePageContext) {
+            return;
         }
 
         if ($this->vehicleMake !== '' && ! $this->vehicleMakes->contains($this->vehicleMake)) {
@@ -529,9 +569,22 @@ class ProductGrid extends Component
         $category = $this->category;
         $storeName = Setting::storeDisplayName();
 
-        $titleSegment = $category
-            ? ($category->meta_title ?: $category->name.' — Каталог')
-            : 'Каталог';
+        $vehicleEntity = $this->vehicleId > 0 ? Vehicle::query()->find($this->vehicleId) : null;
+        $vehicleLabelForTitle = $this->selectedVehicleLabel;
+        $isVehicleCatalogHead = $vehicleEntity !== null && $this->vehicleLockLabel !== '';
+
+        if ($isVehicleCatalogHead) {
+            $titleSegment = $vehicleLabelForTitle
+                ? 'Запчасти для '.$vehicleLabelForTitle
+                : 'Запчасти для авто';
+            if ($category) {
+                $titleSegment = ($category->meta_title ?: $category->name).' — '.$titleSegment;
+            }
+        } else {
+            $titleSegment = $category
+                ? ($category->meta_title ?: $category->name.' — Каталог')
+                : 'Каталог';
+        }
 
         if ($category?->meta_description) {
             $metaDescription = Seo::metaDescription($category->meta_description);
@@ -540,6 +593,10 @@ class ProductGrid extends Component
                 $category->description,
                 'Каталог «'.$category->name.'» в интернет-магазине '.$storeName.'.',
             );
+        } elseif ($isVehicleCatalogHead && $vehicleLabelForTitle !== null && $vehicleLabelForTitle !== '') {
+            $metaDescription = Seo::metaDescription(
+                'Каталог запчастей для '.$vehicleLabelForTitle.' в '.$storeName.'.',
+            );
         } else {
             $metaDescription = Setting::get(
                 'site_meta_description',
@@ -547,13 +604,20 @@ class ProductGrid extends Component
             );
         }
 
-        $catalogQuery = array_filter([
-            'vehicleId' => $this->vehicleId > 0 ? $this->vehicleId : null,
-        ], fn ($v) => $v !== null && $v !== 0);
+        if ($vehicleEntity !== null) {
+            $canonicalUrl = route('vehicle.parts', array_filter([
+                'vehicle' => $vehicleEntity,
+                'categorySlug' => $this->categorySlug !== null && $this->categorySlug !== '' ? $this->categorySlug : null,
+            ], fn ($v) => $v !== null && $v !== ''));
+        } else {
+            $catalogQuery = array_filter([
+                'vehicleId' => $this->vehicleId > 0 ? $this->vehicleId : null,
+            ], fn ($v) => $v !== null && $v !== 0);
 
-        $canonicalUrl = $this->categorySlug
-            ? route('catalog', array_merge(['categorySlug' => $this->categorySlug], $catalogQuery))
-            : ($catalogQuery !== [] ? route('catalog', $catalogQuery) : route('catalog'));
+            $canonicalUrl = $this->categorySlug
+                ? route('catalog', array_merge(['categorySlug' => $this->categorySlug], $catalogQuery))
+                : ($catalogQuery !== [] ? route('catalog', $catalogQuery) : route('catalog'));
+        }
 
         return view('livewire.storefront.product-grid', [
             'products' => $this->products,

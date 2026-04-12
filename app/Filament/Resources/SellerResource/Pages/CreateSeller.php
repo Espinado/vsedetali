@@ -7,6 +7,7 @@ use App\Filament\Support\FilamentSweetAlert;
 use App\Models\SellerStaff;
 use App\Models\Warehouse;
 use App\Services\SellerStaffInvitationService;
+use App\Support\MarketplaceSellerSlug;
 use Filament\Actions\Action;
 use Filament\Notifications\Notification;
 use Filament\Resources\Pages\CreateRecord;
@@ -57,16 +58,7 @@ class CreateSeller extends CreateRecord
             throw ValidationException::withMessages(['admin_email' => 'Заполните данные администратора продавца.']);
         }
 
-        $base = Str::slug($data['name']);
-        if ($base === '') {
-            $base = 'seller';
-        }
-        $slug = $base;
-        $i = 0;
-        while (\App\Models\Seller::query()->where('slug', $slug)->exists()) {
-            $slug = $base.'-'.(++$i);
-        }
-        $data['slug'] = $slug;
+        $data['slug'] = MarketplaceSellerSlug::unique((string) ($data['name'] ?? ''));
         $data['user_id'] = null;
         $data['status'] = $data['status'] ?? 'active';
 

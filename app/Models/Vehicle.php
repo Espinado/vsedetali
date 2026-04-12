@@ -58,6 +58,30 @@ class Vehicle extends Model
     }
 
     /**
+     * Год или диапазон лет применимости для витрины (вторые скобки после марки/модели).
+     * Если в БД нет годов — без суффикса.
+     */
+    public function storefrontYearRangeSuffix(): string
+    {
+        if ($this->year_from === null && $this->year_to === null) {
+            return '';
+        }
+        if ($this->year_from !== null && $this->year_to !== null) {
+            $from = (int) $this->year_from;
+            $to = (int) $this->year_to;
+
+            return $from === $to
+                ? ' ('.$from.')'
+                : ' ('.$from.'–'.$to.')';
+        }
+        if ($this->year_from !== null) {
+            return ' (с '.(int) $this->year_from.')';
+        }
+
+        return ' (до '.(int) $this->year_to.')';
+    }
+
+    /**
      * Краткая строка для карточки товара: «BMW X5 (2010–2020), универсал, 2.0 TDI».
      */
     public function shortCompatibilityLabel(): string
@@ -73,11 +97,7 @@ class Vehicle extends Model
         if ($name === '') {
             return '';
         }
-        if ($this->year_from !== null || $this->year_to !== null) {
-            $y1 = $this->year_from ?? '…';
-            $y2 = $this->year_to ?? '…';
-            $name .= ' ('.$y1.'–'.$y2.')';
-        }
+        $name .= $this->storefrontYearRangeSuffix();
 
         $detailParts = array_values(array_filter([
             $this->body_type !== null && trim((string) $this->body_type) !== ''

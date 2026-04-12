@@ -10,6 +10,8 @@ class Brand extends Model
 {
     use HasFactory;
 
+    public const PLATFORM_UNKNOWN_SLUG = 'platform-brand-unknown';
+
     protected $fillable = [
         'name',
         'slug',
@@ -32,5 +34,16 @@ class Brand extends Model
     public function scopeActive($query)
     {
         return $query->where('is_active', true);
+    }
+
+    /**
+     * Бренд-заглушка для строк каталога без производителя (модерация продавца, импорты и т.п.).
+     */
+    public static function platformUnknownFallback(): self
+    {
+        return static::query()->firstOrCreate(
+            ['slug' => self::PLATFORM_UNKNOWN_SLUG],
+            ['name' => 'Без бренда (площадка)', 'is_active' => true],
+        );
     }
 }

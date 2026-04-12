@@ -38,13 +38,8 @@ class PageResource extends Resource
                 Forms\Components\TextInput::make('title')
                     ->label('Заголовок')
                     ->required()
-                    ->maxLength(255),
-                Forms\Components\TextInput::make('slug')
-                    ->label('Slug (URL)')
-                    ->required()
                     ->maxLength(255)
-                    ->unique(ignoreRecord: true)
-                    ->helperText('Адрес на сайте: /page/{slug}. Для контактов оставьте contacts.'),
+                    ->helperText('Адрес страницы на сайте (/page/…) подставляется из заголовка. Страницы «Контакты», «Доставка», «Оплата» сохраняют прежний адрес при правке.'),
                 Forms\Components\Section::make('SEO')
                     ->schema([
                         Forms\Components\TextInput::make('meta_title')
@@ -58,7 +53,7 @@ class PageResource extends Resource
                     ->collapsed()
                     ->collapsible(),
                 Forms\Components\Section::make('Контакты')
-                    ->description('На витрине используется только для страницы со slug «contacts» (/page/contacts). Для «Доставка» / «Оплата» можно не заполнять.')
+                    ->description('Блок контактов на витрине выводится для страницы «Контакты». Для «Доставка» и «Оплата» обычно не нужен.')
                     ->schema([
                         Forms\Components\TextInput::make('contact_email')
                             ->label('Email')
@@ -92,10 +87,6 @@ class PageResource extends Resource
                     ->label('Заголовок')
                     ->searchable()
                     ->sortable(),
-                Tables\Columns\TextColumn::make('slug')
-                    ->label('Slug')
-                    ->searchable()
-                    ->copyable(),
                 Tables\Columns\IconColumn::make('is_active')
                     ->label('На сайте')
                     ->boolean()

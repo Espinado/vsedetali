@@ -14,7 +14,6 @@ class ProductController extends Controller
             'category',
             'brand',
             'images' => fn ($q) => $q->orderBy('sort'),
-            'attributes' => fn ($q) => $q->orderBy('sort'),
             'vehicles',
             'oemNumbers',
             'crossNumbers',

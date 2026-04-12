@@ -2,11 +2,13 @@
 
 namespace App\Services;
 
+use App\Models\Brand;
 use App\Models\Category;
 use App\Models\Product;
 use App\Models\ProductImage;
 use App\Models\SellerProduct;
 use App\Models\Warehouse;
+use App\Support\ProductCatalogSlug;
 use App\Support\SellerListingVehicleCompatibilities;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
@@ -14,8 +16,6 @@ use Illuminate\Validation\ValidationException;
 
 class SellerSubmittedProductService
 {
-    private const MARKETPLACE_CATEGORY_SLUG = 'seller-marketplace';
-
     /**
      * @param  array{vehicle_compatibilities: list<array{vehicle_make: string, vehicle_model: string, compatibility_years: array<int|string>}>, listing_name: string, listing_images: list<string>|null, price: float|int|string, cost_price?: float|int|string|null, quantity: int|string, oem_code?: string|null, article?: string|null, shipping_days?: int|string|null}  $data
      */
@@ -49,7 +49,7 @@ class SellerSubmittedProductService
 
         return DB::transaction(function () use ($sellerId, $data, $name, $vehicleIds, $images, $warehouseId): SellerProduct {
             $category = Category::query()->firstOrCreate(
-                ['slug' => self::MARKETPLACE_CATEGORY_SLUG],
+                ['slug' => Category::MARKETPLACE_MODERATION_SLUG],
                 [
                     'name' => 'Маркетплейс (модерация)',
                     'parent_id' => null,
@@ -58,12 +58,14 @@ class SellerSubmittedProductService
                 ]
             );
 
+            $fallbackBrand = Brand::platformUnknownFallback();
+
             $sku = $this->uniqueSku($sellerId);
-            $slug = $this->uniqueSlug($name);
+            $slug = ProductCatalogSlug::unique($name, $fallbackBrand->name);
 
             $product = Product::query()->create([
                 'category_id' => $category->id,
-                'brand_id' => null,
+                'brand_id' => $fallbackBrand->id,
                 'code' => $sku,
                 'sku' => $sku,
                 'name' => $name,
@@ -108,18 +110,4 @@ class SellerSubmittedProductService
         return $sku;
     }
 
-    private function uniqueSlug(string $name): string
-    {
-        $base = Str::slug($name);
-        if ($base === '') {
-            $base = 'seller-product';
-        }
-        $slug = $base;
-        $n = 0;
-        while (Product::query()->where('slug', $slug)->exists()) {
-            $slug = $base.'-'.(++$n);
-        }
-
-        return Str::limit($slug, 500, '');
-    }
 }

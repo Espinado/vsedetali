@@ -1,4 +1,13 @@
 <div class="relative">
+    @php
+        $catalogLink = function (array $params = []) use ($vehiclePageContext, $vehicleId) {
+            if ($vehiclePageContext && $vehicleId > 0) {
+                return route('vehicle.parts', array_merge(['vehicle' => $vehicleId], $params));
+            }
+
+            return $params === [] ? route('catalog') : route('catalog', $params);
+        };
+    @endphp
     {{-- Ожидание ответа сервера при смене фильтров, сортировки, поиска или страницы --}}
     <div
         wire:loading.delay.shortest
@@ -18,13 +27,19 @@
     </div>
 
     <nav class="text-sm text-slate-500 mb-6 -mx-1 px-1 overflow-x-auto whitespace-nowrap sm:whitespace-normal sm:overflow-visible" aria-label="Навигация">
-        <a href="{{ route('catalog') }}" class="font-medium text-slate-700 hover:text-slate-900">Каталог</a>
+        <a href="{{ route('home') }}" class="font-medium text-slate-700 hover:text-slate-900">Главная</a>
+        @if($vehiclePageContext && $this->selectedVehicleLabel)
+            <span class="mx-1">/</span>
+            <span class="text-slate-700">{{ $this->selectedVehicleLabel }}</span>
+        @endif
+        <span class="mx-1">/</span>
+        <a href="{{ $catalogLink() }}" class="font-medium text-slate-700 hover:text-slate-900">Каталог</a>
         @foreach($this->categoryBreadcrumbChain as $cat)
             <span class="mx-1">/</span>
             @if($loop->last)
                 <span class="text-slate-700 font-medium">{{ $cat->name }}</span>
             @else
-                <a href="{{ route('catalog', ['categorySlug' => $cat->slug]) }}" class="hover:text-slate-700">{{ $cat->name }}</a>
+                <a href="{{ $catalogLink(['categorySlug' => $cat->slug]) }}" class="hover:text-slate-700">{{ $cat->name }}</a>
             @endif
         @endforeach
     </nav>
@@ -46,7 +61,7 @@
                 <div class="rounded-b-lg border-t border-orange-100 bg-white px-2 py-2.5">
                     <ul class="space-y-1">
                         <li>
-                            <a href="{{ route('catalog') }}"
+                            <a href="{{ $catalogLink() }}"
                                class="block rounded-md px-2 py-2 text-base leading-snug {{ !$categorySlug ? 'bg-orange-50 font-medium text-stone-900' : 'text-stone-600 hover:bg-orange-50/60' }}"
                             >Все товары</a>
                         </li>
@@ -62,7 +77,7 @@
                                     @endphp
                                     <details class="sidebar-accordion sidebar-category-branch rounded-md" @if($openBranch) open @endif>
                                         <summary class="flex w-full cursor-pointer list-none items-stretch gap-0.5 rounded-md text-base leading-snug text-stone-600 hover:bg-orange-50/60 [&::-webkit-details-marker]:hidden">
-                                            <a href="{{ route('catalog', ['categorySlug' => $root->slug]) }}"
+                                            <a href="{{ $catalogLink(['categorySlug' => $root->slug]) }}"
                                                class="min-w-0 flex-1 rounded-l-md px-2 py-2 text-left {{ $categorySlug === $root->slug ? 'bg-orange-50 font-medium text-stone-900' : 'text-stone-600 hover:bg-orange-50/60' }}"
                                                onclick="event.stopPropagation()">{{ $root->name }}</a>
                                             <span class="flex shrink-0 items-center px-1.5 text-slate-500" aria-hidden="true">
@@ -74,7 +89,7 @@
                                         <ul class="ml-2 mt-1 space-y-1 border-l border-orange-100 pl-2 pb-1">
                                             @foreach($root->children as $child)
                                                 <li>
-                                                    <a href="{{ route('catalog', ['categorySlug' => $child->slug]) }}"
+                                                    <a href="{{ $catalogLink(['categorySlug' => $child->slug]) }}"
                                                        class="block rounded-md px-2 py-1.5 text-base leading-snug {{ $categorySlug === $child->slug ? 'bg-orange-50 font-medium text-stone-900' : 'text-stone-600 hover:bg-orange-50/60' }}"
                                                     >{{ $child->name }}</a>
                                                 </li>
@@ -82,7 +97,7 @@
                                         </ul>
                                     </details>
                                 @else
-                                    <a href="{{ route('catalog', ['categorySlug' => $root->slug]) }}"
+                                    <a href="{{ $catalogLink(['categorySlug' => $root->slug]) }}"
                                        class="block rounded-md px-2 py-2 text-base leading-snug {{ $categorySlug === $root->slug ? 'bg-orange-50 font-medium text-stone-900' : 'text-stone-600 hover:bg-orange-50/60' }}"
                                     >{{ $root->name }}</a>
                                 @endif
@@ -94,37 +109,46 @@
 
             <div>
                 <h3 class="font-semibold text-slate-800 mb-3">Подбор по авто</h3>
-                <div class="space-y-3">
-                    <div>
-                        <label for="vehicle-make" class="block text-sm text-slate-600 mb-1">Марка</label>
-                        <select id="vehicle-make" wire:model.live="vehicleMake" class="w-full rounded-lg border-slate-300 shadow-sm text-sm">
-                            <option value="">Все марки</option>
-                            @foreach($this->vehicleMakes as $make)
-                                <option value="{{ $make }}">{{ $make }}</option>
-                            @endforeach
-                        </select>
-                    </div>
+                @if($vehiclePageContext && $this->selectedVehicleLabel)
+                    <p class="rounded-lg border border-orange-100/90 bg-orange-50/50 px-3 py-2 text-sm leading-snug text-stone-800">
+                        {{ $this->selectedVehicleLabel }}
+                    </p>
+                    <p class="mt-2 text-xs text-slate-500">
+                        <a href="{{ route('home') }}" class="font-medium text-orange-800 underline decoration-orange-200 underline-offset-2 hover:decoration-orange-500">Выбрать другое авто</a>
+                    </p>
+                @else
+                    <div class="space-y-3">
+                        <div>
+                            <label for="vehicle-make" class="block text-sm text-slate-600 mb-1">Марка</label>
+                            <select id="vehicle-make" wire:model.live="vehicleMake" class="w-full rounded-lg border-slate-300 shadow-sm text-sm">
+                                <option value="">Все марки</option>
+                                @foreach($this->vehicleMakes as $make)
+                                    <option value="{{ $make }}">{{ $make }}</option>
+                                @endforeach
+                            </select>
+                        </div>
 
-                    <div>
-                        <label for="vehicle-model" class="block text-sm text-slate-600 mb-1">Модель</label>
-                        <select id="vehicle-model" wire:model.live="vehicleModel" class="w-full rounded-lg border-slate-300 shadow-sm text-sm" @disabled($vehicleMake === '')>
-                            <option value="">Все модели</option>
-                            @foreach($this->vehicleModels as $model)
-                                <option value="{{ $model }}">{{ $model }}</option>
-                            @endforeach
-                        </select>
-                    </div>
+                        <div>
+                            <label for="vehicle-model" class="block text-sm text-slate-600 mb-1">Модель</label>
+                            <select id="vehicle-model" wire:model.live="vehicleModel" class="w-full rounded-lg border-slate-300 shadow-sm text-sm" @disabled($vehicleMake === '')>
+                                <option value="">Все модели</option>
+                                @foreach($this->vehicleModels as $model)
+                                    <option value="{{ $model }}">{{ $model }}</option>
+                                @endforeach
+                            </select>
+                        </div>
 
-                    <div>
-                        <label for="vehicle-year" class="block text-sm text-slate-600 mb-1">Год</label>
-                        <select id="vehicle-year" wire:model.live="vehicleYear" class="w-full rounded-lg border-slate-300 shadow-sm text-sm" @disabled($vehicleModel === '')>
-                            <option value="0">Любой год</option>
-                            @foreach($this->vehicleYears as $year)
-                                <option value="{{ $year }}">{{ $year }}</option>
-                            @endforeach
-                        </select>
+                        <div>
+                            <label for="vehicle-year" class="block text-sm text-slate-600 mb-1">Год</label>
+                            <select id="vehicle-year" wire:model.live="vehicleYear" class="w-full rounded-lg border-slate-300 shadow-sm text-sm" @disabled($vehicleModel === '')>
+                                <option value="0">Любой год</option>
+                                @foreach($this->vehicleYears as $year)
+                                    <option value="{{ $year }}">{{ $year }}</option>
+                                @endforeach
+                            </select>
+                        </div>
                     </div>
-                </div>
+                @endif
             </div>
 
             <div>
@@ -201,6 +225,9 @@
 
     {{-- Контент: поиск, сортировка, сетка — на мобильных сверху --}}
     <div class="order-1 min-w-0 flex-1 lg:order-2">
+        @if($vehiclePageContext && $this->selectedVehicleLabel)
+            <h1 class="mb-4 text-xl font-bold text-stone-900 sm:text-2xl">Запчасти для {{ $this->selectedVehicleLabel }}</h1>
+        @endif
         <div class="mb-6 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
             <div class="w-full min-w-0 sm:max-w-md sm:flex-1 lg:max-w-xs">
                 <input type="search"

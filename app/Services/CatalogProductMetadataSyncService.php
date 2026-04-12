@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Models\Category;
 use App\Models\Product;
+use App\Support\CategoryCatalogSlug;
 use App\Models\ProductAttribute;
 use App\Models\ProductCrossNumber;
 use App\Models\ProductOemNumber;
@@ -184,7 +185,7 @@ class CatalogProductMetadataSyncService
             return $existing;
         }
 
-        $slug = $this->makeGloballyUniqueCategorySlug($name, $parentId);
+        $slug = CategoryCatalogSlug::uniqueTechnicalPrefixed($name, $parentId);
 
         return Category::query()->create([
             'parent_id' => $parentId,
@@ -193,22 +194,6 @@ class CatalogProductMetadataSyncService
             'is_active' => true,
             'sort' => 0,
         ]);
-    }
-
-    protected function makeGloballyUniqueCategorySlug(string $name, ?int $parentId): string
-    {
-        $base = 'td-'.Str::slug($name);
-        if ($base === 'td-' || $base === 'td') {
-            $base = 'td-cat-'.substr(sha1($name.'|'.(string) $parentId), 0, 12);
-        }
-        $slug = $base;
-        $i = 0;
-        while (Category::query()->where('slug', $slug)->exists()) {
-            $i++;
-            $slug = $base.'-'.$i;
-        }
-
-        return Str::limit($slug, 255, '');
     }
 
     protected function primaryPartNumberFromSku(Product $product): string
