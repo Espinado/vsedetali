@@ -31,6 +31,10 @@ final class CatalogStorefrontCategoryConflictDetector
             return 'brake_name_lighting_category';
         }
 
+        if (self::nameLooksCardanRelated($name) && self::categoryLooksCvJointRelated($cat)) {
+            return 'cardan_name_cvjoint_category';
+        }
+
         return null;
     }
 
@@ -51,6 +55,10 @@ final class CatalogStorefrontCategoryConflictDetector
 
         if (self::nameLooksBrakeRelated($name) && self::categoryLooksLightingRelated($cat)) {
             return 'brake_name_lighting_category';
+        }
+
+        if (self::nameLooksCardanRelated($name) && self::categoryLooksCvJointRelated($cat)) {
+            return 'cardan_name_cvjoint_category';
         }
 
         return null;
@@ -117,5 +125,18 @@ final class CatalogStorefrontCategoryConflictDetector
         }
 
         return false;
+    }
+
+    private static function nameLooksCardanRelated(string $nameLower): bool
+    {
+        return mb_stripos($nameLower, 'кардан') !== false
+            || mb_stripos($nameLower, 'карданн') !== false
+            || (mb_stripos($nameLower, 'муфт') !== false && mb_stripos($nameLower, 'вала') !== false);
+    }
+
+    private static function categoryLooksCvJointRelated(string $catLower): bool
+    {
+        return mb_stripos($catLower, 'шарнир') !== false
+            || mb_stripos($catLower, 'шрус') !== false;
     }
 }

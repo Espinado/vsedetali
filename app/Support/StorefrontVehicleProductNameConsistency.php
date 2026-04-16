@@ -108,8 +108,11 @@ final class StorefrontVehicleProductNameConsistency
         $rows = DB::table('product_vehicle')
             ->join('products', 'products.id', '=', 'product_vehicle.product_id')
             ->join('vehicles', 'vehicles.id', '=', 'product_vehicle.vehicle_id')
+            ->join('categories', 'categories.id', '=', 'products.category_id')
             ->where('products.is_active', true)
             ->whereRaw('LOWER(vehicles.make) = ?', [$makeLower])
+            ->where('categories.is_active', true)
+            ->where('categories.slug', 'not like', self::hiddenCategorySlugLike())
             ->select(['vehicles.id as vehicle_id', 'products.name as product_name', 'vehicles.make as vehicle_make'])
             ->get();
 
@@ -126,5 +129,12 @@ final class StorefrontVehicleProductNameConsistency
         }
 
         return collect(array_keys($out))->sort()->values();
+    }
+
+    private static function hiddenCategorySlugLike(): string
+    {
+        $prefix = (string) config('storefront.hidden_category_slug_prefix', 'import-');
+
+        return str_replace(['\\', '%', '_'], ['\\\\', '\\%', '\\_'], $prefix).'%';
     }
 }
