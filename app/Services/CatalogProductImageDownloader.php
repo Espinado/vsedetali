@@ -14,9 +14,57 @@ use Illuminate\Support\Str;
  */
 class CatalogProductImageDownloader
 {
+    /**
+     * Имена файлов каталога в public disk: `products/{prefix}{random}.ext` (без подпапок).
+     * Сброс импорта удаляет только такие файлы + устаревший каталог `products/catalog/`.
+     */
+    public const CATALOG_FLAT_FILENAME_PREFIX = 'catalog-img-';
+
     public function __construct(
         protected AutoPartsCatalogService $catalog
     ) {}
+
+    /**
+     * Удаляет строки product_images, указывающие на отсутствующий локальный файл
+     * (после восстановления БД без файлов, очистки storage и т.п.). URL с http(s) не трогаем.
+     */
+    public function pruneMissingLocalFilesForProduct(Product $product): int
+    {
+        $disk = Storage::disk('public');
+        $deleted = 0;
+
+        foreach (ProductImage::query()->where('product_id', $product->id)->cursor() as $image) {
+            $path = trim((string) $image->path);
+            if ($path === '') {
+                $image->delete();
+                $deleted++;
+
+                continue;
+            }
+            if (preg_match('#^https?://#i', $path) === 1) {
+                continue;
+            }
+            $rel = ltrim(str_replace('\\', '/', $path), '/');
+            $rel = preg_replace('#^storage/#', '', $rel) ?? $rel;
+            if (! $disk->exists($rel)) {
+                $image->delete();
+                $deleted++;
+            }
+        }
+
+        return $deleted;
+    }
+
+    /**
+     * После {@see pruneMissingLocalFilesForProduct}: есть ли хотя бы одно изображение с рабочим файлом или внешним URL.
+     */
+    public function productHasUsableImages(Product $product): bool
+    {
+        $this->pruneMissingLocalFilesForProduct($product);
+        $product->unsetRelation('images');
+
+        return $product->images()->exists();
+    }
 
     /**
      * Запрос URL картинки у API и сохранение файла для товара (если ещё нет изображений).
@@ -25,12 +73,12 @@ class CatalogProductImageDownloader
      */
     public function attachFromArticleNumberIfConfigured(Product $product, string $articleNumber): string
     {
-        if (! $this->catalog->isConfigured()) {
-            return 'no_api';
+        if ($this->productHasUsableImages($product)) {
+            return 'has_images';
         }
 
-        if ($product->images()->exists()) {
-            return 'has_images';
+        if (! $this->catalog->isConfigured()) {
+            return 'no_api';
         }
 
         try {
@@ -57,14 +105,18 @@ class CatalogProductImageDownloader
      *
      * @return 'attached'|'no_api'|'has_images'|'no_url'|'api_error'|'download_failed'
      */
-    public function attachFromSkuRawIfConfigured(Product $product, string $skuRaw, ?string $alternateCode = null): string
-    {
-        if (! $this->catalog->isConfigured()) {
-            return 'no_api';
+    public function attachFromSkuRawIfConfigured(
+        Product $product,
+        string $skuRaw,
+        ?string $alternateCode = null,
+        bool $skipUsableImagesCheck = false,
+    ): string {
+        if (! $skipUsableImagesCheck && $this->productHasUsableImages($product)) {
+            return 'has_images';
         }
 
-        if ($product->images()->exists()) {
-            return 'has_images';
+        if (! $this->catalog->isConfigured()) {
+            return 'no_api';
         }
 
         try {
@@ -146,11 +198,8 @@ class CatalogProductImageDownloader
 
             return false;
         }
-
-
-        $dir = 'products/catalog/'.$product->id;
-        $name = Str::lower(Str::random(16)).'.'.$ext;
-        $relativePath = $dir.'/'.$name;
+        $name = self::CATALOG_FLAT_FILENAME_PREFIX.Str::lower(Str::random(16)).'.'.$ext;
+        $relativePath = 'products/'.$name;
 
         Storage::disk('public')->put($relativePath, $body);
 

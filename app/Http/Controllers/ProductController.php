@@ -4,7 +4,9 @@ namespace App\Http\Controllers;
 
 use App\Models\Product;
 use App\Models\Setting;
+use App\Models\Vehicle;
 use App\Support\Seo;
+use App\Support\StorefrontVehicleFilter;
 
 class ProductController extends Controller
 {
@@ -78,10 +80,22 @@ class ProductController extends Controller
             mb_strtolower((string) $v->model),
         ]);
 
-        $crossAnalogItems = $product->crossNumbersWithLinkedProducts();
+        $vehicleIdForAnalogs = (int) request()->query('vehicleId', 0);
+        $vehicleMakeForAnalogs = trim((string) request()->query('vehicleMake', ''));
+        $vehicleModelForAnalogs = trim((string) request()->query('vehicleModel', ''));
+        $vehicleYearRawForAnalogs = trim((string) request()->query('vehicleYear', ''));
+        $yearBoundsForAnalogs = StorefrontVehicleFilter::parseYearSelectionBounds($vehicleYearRawForAnalogs);
+
+        $crossAnalogItems = $product->crossNumbersWithLinkedProducts(
+            forVehicleId: $vehicleIdForAnalogs > 0 ? $vehicleIdForAnalogs : null,
+            forVehicleMake: $vehicleMakeForAnalogs !== '' ? $vehicleMakeForAnalogs : null,
+            forVehicleModel: $vehicleModelForAnalogs !== '' ? $vehicleModelForAnalogs : null,
+            forVehicleYearFrom: $yearBoundsForAnalogs['from'] ?? null,
+            forVehicleYearTo: $yearBoundsForAnalogs['to'] ?? null,
+        );
 
         $vehiclesCompatLinks = $vehiclesSorted
-            ->map(fn (\App\Models\Vehicle $v) => [
+            ->map(fn (Vehicle $v) => [
                 'vehicle' => $v,
                 'label' => $product->vehicleCompatibilityLineForStorefront($v),
             ])

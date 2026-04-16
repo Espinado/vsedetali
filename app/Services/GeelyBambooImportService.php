@@ -7,6 +7,7 @@ use App\Models\Category;
 use App\Support\ProductCatalogSlug;
 use App\Support\VehicleLabelNormalizer;
 use App\Models\Product;
+use App\Models\ProductOemNumber;
 use App\Models\Stock;
 use App\Models\Vehicle;
 use App\Models\Warehouse;
@@ -202,6 +203,15 @@ class GeelyBambooImportService
                     $product->save();
 
                     $oemForPivot = Str::limit(explode('/', $oem)[0], 100, '');
+                    if ($oemForPivot !== '') {
+                        ProductOemNumber::query()->firstOrCreate(
+                            [
+                                'product_id' => $product->id,
+                                'oem_number' => $oemForPivot,
+                            ],
+                            []
+                        );
+                    }
 
                     if (! $product->vehicles()->where('vehicles.id', $vehicle->id)->exists()) {
                         $product->vehicles()->attach($vehicle->id, ['oem_number' => $oemForPivot ?: null]);

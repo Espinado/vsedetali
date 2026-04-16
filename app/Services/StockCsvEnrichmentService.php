@@ -174,7 +174,7 @@ class StockCsvEnrichmentService
 
                 try {
                     $codeAlt = trim($code) !== '' ? trim($code) : null;
-                    $enriched = $this->catalog->lookupEnrichedForStockWithCandidates($skuRaw, $codeAlt);
+                    $enriched = $this->catalog->lookupEnrichedForStockWithCandidates($skuRaw, $codeAlt, $name);
                     if (($enriched['source'] ?? '') === 'none') {
                         $stats['rows_skipped_not_found']++;
                         if ($notFoundHandle !== null) {

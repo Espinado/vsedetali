@@ -7,7 +7,7 @@ use App\Services\CatalogProductImageDownloader;
 use Illuminate\Console\Command;
 
 /**
- * Догрузка фото из RapidAPI для товаров без изображений (путь как при импорте: storage/app/public/products/catalog/...).
+ * Догрузка фото из RapidAPI для товаров без изображений (плоский каталог storage/app/public/products/).
  */
 class ProductsDownloadCatalogImagesCommand extends Command
 {
@@ -15,7 +15,7 @@ class ProductsDownloadCatalogImagesCommand extends Command
         {--limit=0 : Обработать не больше N товаров (0 = все)}
         {--sleep=80 : Пауза между попытками, мс}';
 
-    protected $description = 'Скачивает фото каталога по артикулу из SKU для товаров без изображений';
+    protected $description = 'Скачивает фото каталога по SKU; подчищает «битые» ссылки на файлы (БД без storage) и догружает';
 
     public function handle(CatalogProductImageDownloader $downloader): int
     {
@@ -24,7 +24,6 @@ class ProductsDownloadCatalogImagesCommand extends Command
 
         $query = Product::query()
             ->active()
-            ->whereDoesntHave('images')
             ->orderBy('id');
 
         $processed = 0;
@@ -36,9 +35,13 @@ class ProductsDownloadCatalogImagesCommand extends Command
         ];
 
         $this->info('Поиск фото по API для товаров без картинок...');
-        $this->line('Файлы сохраняются в storage/app/public/products/catalog/{id}/ (URL: /storage/products/catalog/...).');
+        $this->line('Файлы сохраняются в storage/app/public/products/ (URL: /storage/products/…, без подпапок).');
 
         foreach ($query->lazy(50) as $product) {
+            if ($downloader->productHasUsableImages($product)) {
+                continue;
+            }
+
             if ($limit > 0 && $processed >= $limit) {
                 break;
             }
@@ -48,7 +51,7 @@ class ProductsDownloadCatalogImagesCommand extends Command
                 : null;
 
             try {
-                $result = $downloader->attachFromSkuRawIfConfigured($product, (string) $product->sku, $codeAlt);
+                $result = $downloader->attachFromSkuRawIfConfigured($product, (string) $product->sku, $codeAlt, true);
             } catch (\Throwable $e) {
                 $failed++;
                 $this->warn("SKU {$product->sku}: {$e->getMessage()}");

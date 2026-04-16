@@ -158,13 +158,27 @@
 
     {{-- Аналоги: карточки одного размера с превью --}}
     @if($crossAnalogItems->isNotEmpty())
+        @php
+            $hfAnalogVehicleQuery = array_filter(
+                request()->only(['vehicleId', 'vehicleMake', 'vehicleModel', 'vehicleYear']),
+                static fn ($v) => $v !== null && $v !== ''
+            );
+            if (isset($hfAnalogVehicleQuery['vehicleId']) && (int) $hfAnalogVehicleQuery['vehicleId'] <= 0) {
+                unset($hfAnalogVehicleQuery['vehicleId']);
+            }
+            $hfProductUrlWithVehicle = static function (\App\Models\Product $p) use ($hfAnalogVehicleQuery): string {
+                $base = route('product.show', $p);
+
+                return $hfAnalogVehicleQuery === [] ? $base : $base.'?'.http_build_query($hfAnalogVehicleQuery);
+            };
+        @endphp
         <section id="analogs" class="mt-12 pt-8 border-t border-slate-200 scroll-mt-8">
             <h2 class="text-lg font-semibold text-slate-800 mb-2">Аналоги других производителей</h2>
-            <p class="text-sm text-slate-500 mb-6">Показываются только аналоги, которые есть в нашем каталоге как отдельные товары (совпадение номера).</p>
+            <p class="text-sm text-slate-500 mb-6">Показываются только аналоги, которые есть в нашем каталоге как отдельные товары (совпадение номера)@if($hfAnalogVehicleQuery !== []) и подходят к выбранной машине@endif.</p>
             <div class="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
                 @foreach($crossAnalogItems as $item)
                     <article class="flex h-full min-h-[22rem] flex-col overflow-hidden rounded-xl border border-slate-200/90 bg-white shadow-sm ring-1 ring-slate-100/80 transition hover:border-orange-200/80 hover:shadow-md">
-                        <a href="{{ route('product.show', $item->linked) }}" class="block shrink-0 focus:outline-none focus-visible:ring-2 focus-visible:ring-orange-500 focus-visible:ring-offset-2">
+                        <a href="{{ $hfProductUrlWithVehicle($item->linked) }}" class="block shrink-0 focus:outline-none focus-visible:ring-2 focus-visible:ring-orange-500 focus-visible:ring-offset-2">
                             <div class="flex aspect-[5/4] items-center justify-center bg-stone-50">
                                 @if($item->linked->mainImage?->storage_url)
                                     <img src="{{ $item->linked->mainImage->storage_url }}"
@@ -184,7 +198,7 @@
                                 <span class="mx-1 text-slate-300">·</span>
                                 <span class="font-mono text-slate-800">{{ $item->cross->cross_number }}</span>
                             </div>
-                            <a href="{{ route('product.show', $item->linked) }}" class="line-clamp-2 min-h-[2.5rem] text-sm font-semibold leading-snug text-slate-900 hover:text-orange-800">
+                            <a href="{{ $hfProductUrlWithVehicle($item->linked) }}" class="line-clamp-2 min-h-[2.5rem] text-sm font-semibold leading-snug text-slate-900 hover:text-orange-800">
                                 {{ $item->linked->name }}
                             </a>
                             @if($item->linked->brand)

@@ -4,6 +4,7 @@ namespace App\Services;
 
 use Illuminate\Http\Client\Pool;
 use Illuminate\Http\Client\Response;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
@@ -15,6 +16,7 @@ use Illuminate\Support\Str;
  * для OEM — {@see searchByOemArticleNumber}, {@see getCrossReferencesByOemArticleNumber}, {@see getSelectArticleCrossReferencesByArticleId}, {@see getVehiclesByOemPartNumber}.
  *
  * @see https://rapidapi.com/makingdatameaningful/api/auto-parts-catalog
+ * Список путей эндпоинтов (в т.ч. get-compatible-cars-by-article-number, /articles/details/…) см. также Apify Actor «tecdoc» от того же поставщика данных.
  */
 class AutoPartsCatalogService
 {
@@ -24,51 +26,76 @@ class AutoPartsCatalogService
     }
 
     /**
+     * Локальный CA bundle (Mozilla) — см. {@see storage_path('certs/cacert.pem')}; снимает cURL error 77 на Windows, если php.ini указывает на несуществующий cacert.pem.
+     *
+     * @return array{verify: string}|array{}
+     */
+    protected function httpTlsOptionsForCatalog(): array
+    {
+        $ca = storage_path('certs/cacert.pem');
+
+        return is_file($ca) ? ['verify' => $ca] : [];
+    }
+
+    /**
      * Варианты номера для запросов к каталогу: сегмент до «/», полный SKU, без разделителей, только буквы/цифры, колонка «Код» из CSV.
      *
      * @return list<string>
      */
     public function partNumberSearchCandidates(string $skuRaw, ?string $alternateCode = null): array
     {
+        return array_map(
+            static fn (array $row): string => (string) $row['candidate'],
+            $this->partNumberSearchCandidatesDetailed($skuRaw, $alternateCode)
+        );
+    }
+
+    /**
+     * @return list<array{candidate: string, origin: string, allowed: bool}>
+     */
+    public function partNumberSearchCandidatesDetailed(string $skuRaw, ?string $alternateCode = null): array
+    {
         $skuRaw = trim($skuRaw);
         $alternateCode = $alternateCode !== null ? trim($alternateCode) : '';
 
         $out = [];
-        $push = function (string $s) use (&$out): void {
+        $seen = [];
+        $push = function (string $s, string $origin) use (&$out, &$seen): void {
             $s = trim($s);
             if ($s === '') {
                 return;
             }
             $s = Str::limit($s, 100, '');
-            if ($s === '') {
+            if ($s === '' || isset($seen[$s])) {
                 return;
             }
-            foreach ($out as $existing) {
-                if ($existing === $s) {
-                    return;
-                }
-            }
-            $out[] = $s;
+            $seen[$s] = true;
+            $out[] = [
+                'candidate' => $s,
+                'origin' => $origin,
+                'allowed' => ! str_starts_with($origin, 'alternate')
+                    || ! $this->isRiskyAlternateCandidate($s),
+            ];
         };
 
         $primary = trim(Str::limit(explode('/', $skuRaw, 2)[0], 100, ''));
         if ($primary === '') {
             $primary = Str::limit($skuRaw, 100, '');
         }
-        $push($primary);
+        $push($primary, 'sku_primary');
 
         $full = Str::limit($skuRaw, 100, '');
-        $push($full);
+        $push($full, 'sku_full');
 
-        $push($this->compactPartNumber($primary));
-        $push($this->compactPartNumber($full));
-        $push($this->alnumOnlyPartNumber($primary));
-        $push($this->alnumOnlyPartNumber($full));
+        $push($this->compactPartNumber($primary), 'sku_primary_compact');
+        $push($this->compactPartNumber($full), 'sku_full_compact');
+        $push($this->alnumOnlyPartNumber($primary), 'sku_primary_alnum');
+        $push($this->alnumOnlyPartNumber($full), 'sku_full_alnum');
 
         if ($alternateCode !== '') {
-            $push($alternateCode);
-            $push($this->compactPartNumber($alternateCode));
-            $push($this->alnumOnlyPartNumber($alternateCode));
+            $push($alternateCode, 'alternate_raw');
+            $push($this->compactPartNumber($alternateCode), 'alternate_compact');
+            $push($this->alnumOnlyPartNumber($alternateCode), 'alternate_alnum');
         }
 
         $max = max(1, (int) config('remains_stock_import.catalog_search_candidate_limit', 8));
@@ -81,17 +108,141 @@ class AutoPartsCatalogService
      *
      * @return array<string, mixed>
      */
-    public function lookupEnrichedForStockWithCandidates(string $skuRaw, ?string $alternateCode = null): array
+    public function lookupEnrichedForStockWithCandidates(string $skuRaw, ?string $alternateCode = null, ?string $expectedProductName = null): array
     {
-        $last = $this->emptyEnrichmentPayload();
-        foreach ($this->partNumberSearchCandidates($skuRaw, $alternateCode) as $candidate) {
-            $last = $this->lookupEnrichedForStock($candidate);
-            if (($last['source'] ?? 'none') !== 'none') {
-                return $last;
+        $best = $this->emptyEnrichmentPayload();
+        $bestScore = PHP_INT_MIN;
+        $minScore = (int) config('remains_stock_import.catalog_candidate_min_score', 20);
+
+        foreach ($this->partNumberSearchCandidatesDetailed($skuRaw, $alternateCode) as $row) {
+            if (! ($row['allowed'] ?? true)) {
+                continue;
+            }
+
+            $candidate = (string) ($row['candidate'] ?? '');
+            if ($candidate === '') {
+                continue;
+            }
+
+            $enriched = $this->lookupEnrichedForStock($candidate);
+            if (($enriched['source'] ?? 'none') === 'none') {
+                continue;
+            }
+
+            $score = $this->scoreEnrichmentCandidateMatch(
+                $candidate,
+                (string) ($row['origin'] ?? ''),
+                $expectedProductName,
+                $enriched
+            );
+
+            if ($score > $bestScore) {
+                $bestScore = $score;
+                $best = $enriched;
+                $best['candidate_used'] = $candidate;
+                $best['candidate_origin'] = (string) ($row['origin'] ?? '');
+                $best['candidate_score'] = $score;
+            }
+
+            if ($score >= $minScore) {
+                return $best;
             }
         }
 
-        return $last;
+        if ($bestScore >= $minScore) {
+            return $best;
+        }
+
+        return $this->emptyEnrichmentPayload();
+    }
+
+    protected function isRiskyAlternateCandidate(string $candidate): bool
+    {
+        $candidate = trim($candidate);
+        if ($candidate === '') {
+            return true;
+        }
+
+        return ctype_digit($candidate) && strlen($candidate) <= 4;
+    }
+
+    /**
+     * Простая оценка релевантности ответа каталога для кандидата номера.
+     * Низкий балл означает «шумный hit» (часто короткий код из колонки "Код").
+     *
+     * @param  array<string, mixed>  $enriched
+     */
+    protected function scoreEnrichmentCandidateMatch(
+        string $candidate,
+        string $origin,
+        ?string $expectedProductName,
+        array $enriched
+    ): int {
+        $score = match ($origin) {
+            'sku_primary' => 120,
+            'sku_full' => 110,
+            'sku_primary_compact', 'sku_full_compact' => 95,
+            'sku_primary_alnum', 'sku_full_alnum' => 85,
+            'alternate_raw', 'alternate_compact', 'alternate_alnum' => 25,
+            default => 0,
+        };
+
+        if (str_starts_with($origin, 'alternate') && $this->isRiskyAlternateCandidate($candidate)) {
+            $score -= 80;
+        }
+
+        $expected = trim((string) $expectedProductName);
+        if ($expected !== '') {
+            $catalogLabel = trim(implode(' ', array_filter([
+                (string) ($enriched['first_article_name'] ?? ''),
+                (string) ($enriched['category_main'] ?? ''),
+                (string) ($enriched['category_sub'] ?? ''),
+            ], static fn (?string $v): bool => trim((string) $v) !== '')));
+
+            $overlap = $this->keywordOverlapRatio($expected, $catalogLabel);
+            $score += (int) round($overlap * 40);
+            if ($overlap <= 0.0) {
+                $score -= 20;
+            }
+        }
+
+        return $score;
+    }
+
+    protected function keywordOverlapRatio(string $left, string $right): float
+    {
+        $leftTokens = $this->tokenizeForRelevance($left);
+        $rightTokens = $this->tokenizeForRelevance($right);
+        if ($leftTokens === [] || $rightTokens === []) {
+            return 0.0;
+        }
+
+        $hits = 0;
+        foreach ($leftTokens as $token) {
+            if (isset($rightTokens[$token])) {
+                $hits++;
+            }
+        }
+
+        return $hits / max(1, count($leftTokens));
+    }
+
+    /**
+     * @return array<string, true>
+     */
+    protected function tokenizeForRelevance(string $value): array
+    {
+        $parts = preg_split('/[^\p{L}\p{N}]+/u', mb_strtolower($value)) ?: [];
+        $tokens = [];
+        foreach ($parts as $p) {
+            $p = trim($p);
+            if ($p === '' || mb_strlen($p) < 4) {
+                continue;
+            }
+            $tokens[$p] = true;
+        }
+
+        return $tokens;
     }
 
     /**
@@ -269,13 +420,18 @@ class AutoPartsCatalogService
             'X-RapidAPI-Host' => (string) config('services.auto_parts_catalog.host'),
         ];
 
-        $responses = Http::pool(function (Pool $pool) use ($base, $timeout, $headers, $pathsByAlias) {
+        $tls = $this->httpTlsOptionsForCatalog();
+
+        $responses = Http::pool(function (Pool $pool) use ($base, $timeout, $headers, $pathsByAlias, $tls) {
             foreach ($pathsByAlias as $alias => $path) {
-                $pool->as((string) $alias)
+                $pending = $pool->as((string) $alias)
                     ->withHeaders($headers)
                     ->timeout($timeout)
-                    ->acceptJson()
-                    ->get($base.$path);
+                    ->acceptJson();
+                if ($tls !== []) {
+                    $pending = $pending->withOptions($tls);
+                }
+                $pending->get($base.$path);
             }
         });
 
@@ -533,6 +689,287 @@ class AutoPartsCatalogService
     }
 
     /**
+     * Модели и годы выпуска в формате, близком к ответу RapidAPI:
+     * - countModels
+     * - models[]: modelId, modelName, modelYearFrom, modelYearTo
+     *
+     * Важно: собирает применимость по всем уникальным manufacturerId из OEM-поиска,
+     * затем дедуплицирует модели по modelId+modelName.
+     *
+     * @return array{
+     *     countModels: int,
+     *     models: list<array{
+     *         modelId: int|null,
+     *         modelName: string,
+     *         modelYearFrom: string|null,
+     *         modelYearTo: string|null
+     *     }>
+     * }
+     */
+    public function getModelYearsByOem(string $articleOemNo): array
+    {
+        $oemSearch = $this->searchByOemArticleNumber($articleOemNo);
+        $rows = is_array($oemSearch) && array_is_list($oemSearch) ? $oemSearch : [];
+
+        $manufacturerIds = [];
+        foreach ($rows as $row) {
+            if (! is_array($row)) {
+                continue;
+            }
+            $id = $row['manufacturerId'] ?? null;
+            if (is_numeric($id)) {
+                $manufacturerIds[(int) $id] = true;
+            }
+        }
+        $manufacturerIds = array_keys($manufacturerIds);
+
+        if ($manufacturerIds === []) {
+            return [
+                'countModels' => 0,
+                'models' => [],
+            ];
+        }
+
+        $typeId = (int) config('services.auto_parts_catalog.vehicle_type_id');
+        $langId = (int) config('services.auto_parts_catalog.lang_id');
+        $countryId = (int) config('services.auto_parts_catalog.country_filter_id');
+        $oemEnc = rawurlencode($articleOemNo);
+
+        $paths = [];
+        foreach ($manufacturerIds as $manufacturerId) {
+            $paths['vehicles_'.$manufacturerId] = '/articles-oem/selecting-a-list-of-cars-for-oem-part-number'
+                ."/type-id/{$typeId}/lang-id/{$langId}/country-filter-id/{$countryId}"
+                ."/manufacturer-id/{$manufacturerId}/article-oem-no/{$oemEnc}";
+        }
+
+        $responses = $this->rapidApiPoolGet($paths);
+
+        $allVehicles = [];
+        foreach ($responses as $payload) {
+            if (! is_array($payload)) {
+                continue;
+            }
+            $vehicleRows = isset($payload['data']) && is_array($payload['data']) ? $payload['data'] : $payload;
+            if (! is_array($vehicleRows) || ! array_is_list($vehicleRows)) {
+                continue;
+            }
+            foreach ($vehicleRows as $vehicleRow) {
+                if (is_array($vehicleRow)) {
+                    $allVehicles[] = $vehicleRow;
+                }
+            }
+        }
+
+        $models = $this->deduplicateModelsWithYears($allVehicles);
+
+        return [
+            'countModels' => count($models),
+            'models' => $models,
+        ];
+    }
+
+    /**
+     * Основной OEM-сценарий:
+     * категория детали, данные детали (включая первую найденную карточку), фото,
+     * применимость к авто (марка/модель/годы), и аналоги.
+     *
+     * @return array{
+     *   oem: string,
+     *   category_main: string,
+     *   category_sub: string,
+     *   category_raw: array<string, mixed>|null,
+     *   part_data: array<string, mixed>|null,
+     *   part_image_url: string,
+     *   vehicles: list<array{make: string, model: string, body_type: string, year_from: int|null, year_to: int|null, engine: string}>,
+     *   model_years: array{
+     *      countModels: int,
+     *      models: list<array{modelId: int|null, modelName: string, modelYearFrom: string|null, modelYearTo: string|null}>
+     *   },
+     *   analogs: list<array{supplierName: string, articleNo: string, crossManufacturerName: string|null, crossNumber: string|null, searchLevel: string}>,
+     *   oem_search_rows: array<int, mixed>|null
+     * }
+     */
+    public function lookupPrimaryOemData(string $articleOemNo): array
+    {
+        $lookup = $this->lookupByOemPartNumber($articleOemNo, true);
+        $oemRows = is_array($lookup['oem_search'] ?? null) ? $lookup['oem_search'] : null;
+        $firstPartRow = (is_array($oemRows) && array_is_list($oemRows)) ? ($oemRows[0] ?? null) : null;
+
+        $categoryRaw = isset($lookup['category']) && is_array($lookup['category']) ? $lookup['category'] : null;
+        $category = $this->splitCategoryLevels($categoryRaw);
+
+        $vehiclesNormalized = $this->normalizeVehicleList(
+            isset($lookup['vehicles']) && is_array($lookup['vehicles']) ? $lookup['vehicles'] : null
+        );
+
+        $analogs = isset($lookup['cross_reference_analogs']) && is_array($lookup['cross_reference_analogs'])
+            ? $lookup['cross_reference_analogs']
+            : [];
+
+        $partImageUrl = is_array($firstPartRow) ? ($this->extractS3ImageUrlFromArticleRow($firstPartRow) ?? '') : '';
+        if ($partImageUrl === '') {
+            $partImageUrl = $this->resolveCatalogImageUrl($articleOemNo) ?? '';
+        }
+
+        return [
+            'oem' => $articleOemNo,
+            'category_main' => $category['main'],
+            'category_sub' => $category['sub'],
+            'category_raw' => $categoryRaw,
+            'part_data' => is_array($firstPartRow) ? $firstPartRow : null,
+            'part_image_url' => $partImageUrl,
+            'vehicles' => $vehiclesNormalized,
+            'model_years' => $this->getModelYearsByOem($articleOemNo),
+            'analogs' => $analogs,
+            'oem_search_rows' => $oemRows,
+        ];
+    }
+
+    /**
+     * Нормализованный payload для сохранения в БД без дополнительного парсинга.
+     *
+     * @return array{
+     *   oem: string,
+     *   locale: string,
+     *   category: array{main: string, sub: string, full: string},
+     *   part: array{
+     *      article_id: int|null,
+     *      article_no: string,
+     *      name: string,
+     *      supplier_id: int|null,
+     *      supplier_name: string,
+     *      image_url: string,
+     *      specifications: list<array{name: string, value: string}>,
+     *      oem_numbers: list<array{brand: string, number: string}>
+     *   },
+     *   compatibility: array{
+     *      count_models: int,
+     *      models: list<array{model_id: int|null, model_name: string, year_from: string|null, year_to: string|null}>,
+     *      vehicles: list<array{make: string, model: string, body_type: string, year_from: int|null, year_to: int|null, engine: string}>
+     *   },
+     *   analogs: list<array{
+     *      supplier_name: string,
+     *      article_no: string,
+     *      cross_manufacturer_name: string|null,
+     *      cross_number: string|null,
+     *      search_level: string
+     *   }>,
+     *   source_payload: array<string, mixed>
+     * }
+     */
+    public function lookupPersistableOemData(string $articleOemNo): array
+    {
+        $articleOemNo = trim($articleOemNo);
+        $primary = $this->lookupPrimaryOemData($articleOemNo);
+
+        $partData = isset($primary['part_data']) && is_array($primary['part_data']) ? $primary['part_data'] : [];
+        $articleInfo = isset($partData['articleInfo']) && is_array($partData['articleInfo']) ? $partData['articleInfo'] : [];
+
+        $articleId = $this->pickFirstInt([
+            $partData['articleId'] ?? null,
+            $articleInfo['articleId'] ?? null,
+        ]);
+        $articleNo = $this->pickFirstString([
+            $partData['articleNo'] ?? null,
+            $articleInfo['articleNo'] ?? null,
+        ]);
+        $partName = $this->pickFirstString([
+            $partData['articleProductName'] ?? null,
+            $articleInfo['articleProductName'] ?? null,
+        ]);
+        $supplierId = $this->pickFirstInt([
+            $partData['supplierId'] ?? null,
+            $articleInfo['supplierId'] ?? null,
+        ]);
+        $supplierName = $this->pickFirstString([
+            $partData['supplierName'] ?? null,
+            $articleInfo['supplierName'] ?? null,
+        ]);
+
+        $specifications = $this->normalizePartSpecifications(
+            isset($articleInfo['allSpecifications']) && is_array($articleInfo['allSpecifications'])
+                ? $articleInfo['allSpecifications']
+                : []
+        );
+
+        $oemNumbers = $this->normalizePartOemNumbers(
+            isset($articleInfo['oemNo']) && is_array($articleInfo['oemNo'])
+                ? $articleInfo['oemNo']
+                : []
+        );
+
+        $categoryMain = (string) ($primary['category_main'] ?? '');
+        $categorySub = (string) ($primary['category_sub'] ?? '');
+        $categoryFull = trim($categoryMain.($categorySub !== '' ? ' > '.$categorySub : ''));
+
+        $modelYears = isset($primary['model_years']) && is_array($primary['model_years']) ? $primary['model_years'] : ['countModels' => 0, 'models' => []];
+        $modelRows = isset($modelYears['models']) && is_array($modelYears['models']) ? $modelYears['models'] : [];
+        $normalizedModelRows = [];
+        foreach ($modelRows as $modelRow) {
+            if (! is_array($modelRow)) {
+                continue;
+            }
+            $normalizedModelRows[] = [
+                'model_id' => isset($modelRow['modelId']) && is_numeric($modelRow['modelId']) ? (int) $modelRow['modelId'] : null,
+                'model_name' => trim((string) ($modelRow['modelName'] ?? '')),
+                'year_from' => isset($modelRow['modelYearFrom']) && is_string($modelRow['modelYearFrom']) ? $modelRow['modelYearFrom'] : null,
+                'year_to' => isset($modelRow['modelYearTo']) && is_string($modelRow['modelYearTo']) ? $modelRow['modelYearTo'] : null,
+            ];
+        }
+
+        $analogsRaw = isset($primary['analogs']) && is_array($primary['analogs']) ? $primary['analogs'] : [];
+        $analogs = [];
+        foreach ($analogsRaw as $analog) {
+            if (! is_array($analog)) {
+                continue;
+            }
+            $supplier = trim((string) ($analog['supplierName'] ?? ''));
+            $analogArticle = trim((string) ($analog['articleNo'] ?? ''));
+            if ($supplier === '' || $analogArticle === '') {
+                continue;
+            }
+            $analogs[] = [
+                'supplier_name' => $supplier,
+                'article_no' => $analogArticle,
+                'cross_manufacturer_name' => isset($analog['crossManufacturerName']) ? (string) $analog['crossManufacturerName'] : null,
+                'cross_number' => isset($analog['crossNumber']) ? (string) $analog['crossNumber'] : null,
+                'search_level' => isset($analog['searchLevel']) ? (string) $analog['searchLevel'] : '',
+            ];
+        }
+
+        return [
+            'oem' => $articleOemNo,
+            'locale' => 'ru',
+            'category' => [
+                'main' => $categoryMain,
+                'sub' => $categorySub,
+                'full' => $categoryFull,
+            ],
+            'part' => [
+                'article_id' => $articleId,
+                'article_no' => $articleNo,
+                'name' => $partName,
+                'supplier_id' => $supplierId,
+                'supplier_name' => $supplierName,
+                'image_url' => (string) ($primary['part_image_url'] ?? ''),
+                'specifications' => $specifications,
+                'oem_numbers' => $oemNumbers,
+            ],
+            'compatibility' => [
+                'count_models' => isset($modelYears['countModels']) && is_numeric($modelYears['countModels']) ? (int) $modelYears['countModels'] : count($normalizedModelRows),
+                'models' => $normalizedModelRows,
+                'vehicles' => isset($primary['vehicles']) && is_array($primary['vehicles']) ? $primary['vehicles'] : [],
+            ],
+            'analogs' => $analogs,
+            'source_payload' => [
+                'category_raw' => $primary['category_raw'] ?? null,
+                'part_data' => $primary['part_data'] ?? null,
+                'oem_search_rows' => $primary['oem_search_rows'] ?? null,
+            ],
+        ];
+    }
+
+    /**
      * Поиск по артикулу aftermarket + категория + совместимость по номеру (если доступно у провайдера).
      *
      * @return array{
@@ -588,7 +1025,14 @@ class AutoPartsCatalogService
      */
     public function resolveCatalogImageUrlWithCandidates(string $skuRaw, ?string $alternateCode = null): ?string
     {
-        foreach ($this->partNumberSearchCandidates($skuRaw, $alternateCode) as $candidate) {
+        foreach ($this->partNumberSearchCandidatesDetailed($skuRaw, $alternateCode) as $row) {
+            if (! ($row['allowed'] ?? true)) {
+                continue;
+            }
+            $candidate = (string) ($row['candidate'] ?? '');
+            if ($candidate === '') {
+                continue;
+            }
             $url = $this->resolveCatalogImageUrl($candidate);
             if ($url !== null && $url !== '') {
                 return $url;
@@ -596,6 +1040,35 @@ class AutoPartsCatalogService
         }
 
         return null;
+    }
+
+    /**
+     * @param  array<int, mixed>  $rows
+     */
+    protected function extractFirstArticleNameFromRows(array $rows): string
+    {
+        foreach ($rows as $row) {
+            if (! is_array($row)) {
+                continue;
+            }
+            foreach (['articleProductName', 'article_name', 'name', 'articleName'] as $key) {
+                if (! isset($row[$key])) {
+                    continue;
+                }
+                $name = trim((string) $row[$key]);
+                if ($name !== '') {
+                    return Str::limit($name, 255, '');
+                }
+            }
+            if (isset($row['article']) && is_array($row['article'])) {
+                $nested = $this->extractFirstArticleNameFromRows([$row['article']]);
+                if ($nested !== '') {
+                    return $nested;
+                }
+            }
+        }
+
+        return '';
     }
 
     /**
@@ -660,13 +1133,17 @@ class AutoPartsCatalogService
         $url = str_starts_with($pathOrQuery, 'http') ? $pathOrQuery : $base.$pathOrQuery;
         $timeout = (int) config('services.auto_parts_catalog.timeout', 30);
 
-        $response = Http::acceptJson()
+        $req = Http::acceptJson()
             ->timeout($timeout)
             ->withHeaders([
                 'X-RapidAPI-Key' => (string) config('services.auto_parts_catalog.key'),
                 'X-RapidAPI-Host' => (string) config('services.auto_parts_catalog.host'),
-            ])
-            ->get($url);
+            ]);
+        $tls = $this->httpTlsOptionsForCatalog();
+        if ($tls !== []) {
+            $req = $req->withOptions($tls);
+        }
+        $response = $req->get($url);
 
         if (! $response->successful()) {
             throw new \RuntimeException(
@@ -675,6 +1152,1057 @@ class AutoPartsCatalogService
         }
 
         return $response->json();
+    }
+
+    /**
+     * GET к каталогу без исключения при 404/ошибке сети (для перебора вариантов путей).
+     */
+    protected function tryGetJson(string $pathOrQuery): ?array
+    {
+        if (! $this->isConfigured()) {
+            return null;
+        }
+
+        $base = rtrim((string) config('services.auto_parts_catalog.base_url'), '/');
+        $url = str_starts_with($pathOrQuery, 'http') ? $pathOrQuery : $base.$pathOrQuery;
+        $timeout = (int) config('services.auto_parts_catalog.timeout', 30);
+
+        try {
+            $req = Http::acceptJson()
+                ->timeout($timeout)
+                ->withHeaders([
+                    'X-RapidAPI-Key' => (string) config('services.auto_parts_catalog.key'),
+                    'X-RapidAPI-Host' => (string) config('services.auto_parts_catalog.host'),
+                ]);
+            $tls = $this->httpTlsOptionsForCatalog();
+            if ($tls !== []) {
+                $req = $req->withOptions($tls);
+            }
+            $response = $req->get($url);
+            if (! $response->successful()) {
+                return null;
+            }
+            $json = $response->json();
+
+            return is_array($json) ? $json : null;
+        } catch (\Throwable $e) {
+            Log::debug('auto_parts_catalog_try_get_json', [
+                'path' => $pathOrQuery,
+                'message' => $e->getMessage(),
+            ]);
+
+            return null;
+        }
+    }
+
+    /**
+     * Полный набор данных по OEM для записи в БД: категория, деталь со всеми фото,
+     * применимость по конкретным ТС (интервалы выпуска), аналоги с пересечением по тем же машинам и полная применимость аналогов.
+     *
+     * @return array<string, mixed>
+     */
+    public function lookupFullOemBundleForPersistence(string $articleOemNo): array
+    {
+        $articleOemNo = trim($articleOemNo);
+        $langId = (int) config('services.auto_parts_catalog.lang_id');
+
+        $oemSearch = $this->searchByOemArticleNumber($articleOemNo);
+        $oemRows = is_array($oemSearch) && array_is_list($oemSearch) ? $oemSearch : [];
+        $first = $oemRows[0] ?? null;
+        $firstArr = is_array($first) ? $first : [];
+
+        $articleId = isset($firstArr['articleId']) && is_numeric($firstArr['articleId'])
+            ? (int) $firstArr['articleId']
+            : null;
+
+        $categoryRaw = $articleId !== null ? $this->getCategoryByArticleId($articleId) : null;
+        $categoryParts = $this->splitCategoryLevels($categoryRaw);
+
+        $rawApplicability = $this->collectOemRawApplicabilityRows($articleOemNo, $oemRows);
+        $vehiclesDetailed = [];
+        $seenVeh = [];
+        foreach ($rawApplicability as $r) {
+            if (! is_array($r)) {
+                continue;
+            }
+            $norm = $this->normalizeVehicleApplicabilityForDb($r);
+            $fp = $this->vehicleApplicabilityFingerprint($norm);
+            if ($fp === '' || isset($seenVeh[$fp])) {
+                continue;
+            }
+            $seenVeh[$fp] = true;
+            $vehiclesDetailed[] = $norm;
+        }
+
+        $oemIndex = $this->buildOemApplicabilityIndex($rawApplicability);
+
+        $primaryDetail = $articleId !== null ? $this->tryFetchArticleDetailsPayload($articleId, $langId) : null;
+        $primaryArticleInfo = [];
+        if (is_array($primaryDetail)) {
+            if (isset($primaryDetail['articleInfo']) && is_array($primaryDetail['articleInfo'])) {
+                $primaryArticleInfo = $primaryDetail['articleInfo'];
+            } elseif (isset($primaryDetail['article']) && is_array($primaryDetail['article'])) {
+                $primaryArticleInfo = $primaryDetail['article'];
+            }
+        }
+
+        $partArticleNo = $this->pickFirstString([
+            $firstArr['articleNo'] ?? null,
+            $primaryArticleInfo['articleNo'] ?? null,
+        ]);
+        $partName = $this->pickFirstString([
+            $firstArr['articleProductName'] ?? null,
+            $primaryArticleInfo['articleProductName'] ?? null,
+        ]);
+        $supplierId = $this->pickFirstInt([
+            $firstArr['supplierId'] ?? null,
+            $primaryArticleInfo['supplierId'] ?? null,
+        ]);
+        $supplierName = $this->pickFirstString([
+            $firstArr['supplierName'] ?? null,
+            $primaryArticleInfo['supplierName'] ?? null,
+        ]);
+
+        $specifications = $this->normalizePartSpecifications(
+            isset($primaryArticleInfo['allSpecifications']) && is_array($primaryArticleInfo['allSpecifications'])
+                ? $primaryArticleInfo['allSpecifications']
+                : []
+        );
+        if ($specifications === [] && isset($firstArr['allSpecifications']) && is_array($firstArr['allSpecifications'])) {
+            $specifications = $this->normalizePartSpecifications($firstArr['allSpecifications']);
+        }
+
+        $oemNumbers = $this->normalizePartOemNumbers(
+            isset($primaryArticleInfo['oemNo']) && is_array($primaryArticleInfo['oemNo'])
+                ? $primaryArticleInfo['oemNo']
+                : (isset($firstArr['oemNo']) && is_array($firstArr['oemNo']) ? $firstArr['oemNo'] : [])
+        );
+
+        if ($specifications === [] && is_array($primaryDetail)) {
+            foreach (['articleAllSpecifications', 'allSpecifications'] as $specKey) {
+                if (isset($primaryDetail[$specKey]) && is_array($primaryDetail[$specKey])) {
+                    $specifications = $this->normalizePartSpecifications($primaryDetail[$specKey]);
+                    if ($specifications !== []) {
+                        break;
+                    }
+                }
+            }
+        }
+        if ($oemNumbers === [] && is_array($primaryDetail)) {
+            foreach (['articleOemNo', 'oemNo'] as $oemKey) {
+                if (isset($primaryDetail[$oemKey]) && is_array($primaryDetail[$oemKey])) {
+                    $oemNumbers = $this->normalizePartOemNumbers($primaryDetail[$oemKey]);
+                    if ($oemNumbers !== []) {
+                        break;
+                    }
+                }
+            }
+        }
+
+        $imageUrls = $this->collectAllImageUrlsForArticle($articleId, $firstArr, $primaryDetail);
+        $modelYears = $this->getModelYearsByOem($articleOemNo);
+
+        $crossRaw = $this->getCrossReferencesByOemArticleNumber($articleOemNo);
+        $articles = $this->extractArtlookupArticlesArray($crossRaw);
+
+        $analogsReplacement = [];
+        $seenAnalog = [];
+
+        foreach ($articles as $art) {
+            if (! is_array($art)) {
+                continue;
+            }
+            $aid = isset($art['articleId']) && is_numeric($art['articleId']) ? (int) $art['articleId'] : null;
+            if ($aid === null || ($articleId !== null && $aid === $articleId)) {
+                continue;
+            }
+
+            $cars = $this->extractCompatibleCarsFromArticleLikePayload($art);
+            if ($cars === []) {
+                $detail = $this->tryFetchArticleDetailsPayload($aid, $langId);
+                $cars = $this->extractCompatibleCarsFromArticleLikePayload($detail ?? []);
+                if ($cars === []) {
+                    $cars = $this->extractCompatibleCarsFromArticlesBulkResponse($detail ?? [], $aid);
+                }
+            }
+            if ($cars === []) {
+                $an = trim((string) ($art['articleNo'] ?? ''));
+                $sid = isset($art['supplierId']) && is_numeric($art['supplierId']) ? (int) $art['supplierId'] : null;
+                if ($an !== '') {
+                    $bulk = $this->tryGetCompatibleCarsByArticleNumber($an, $sid, $langId);
+                    $cars = $this->extractCompatibleCarsFromArticlesBulkResponse($bulk, $aid);
+                }
+            }
+
+            $matchesSame = [];
+            foreach ($cars as $c) {
+                if (! is_array($c)) {
+                    continue;
+                }
+                if ($this->compatibleCarMatchesOemIndex($c, $oemIndex)) {
+                    $matchesSame[] = $this->normalizeVehicleApplicabilityForDb($c);
+                }
+            }
+            if ($matchesSame === []) {
+                continue;
+            }
+
+            if (isset($seenAnalog[$aid])) {
+                continue;
+            }
+            $seenAnalog[$aid] = true;
+
+            $allCarsNorm = [];
+            foreach ($cars as $c) {
+                if (is_array($c)) {
+                    $allCarsNorm[] = $this->normalizeVehicleApplicabilityForDb($c);
+                }
+            }
+
+            $analogDetail = $this->tryFetchArticleDetailsPayload($aid, $langId);
+            $analogsReplacement[] = [
+                'article_id' => $aid,
+                'supplier_name' => trim((string) ($art['supplierName'] ?? '')),
+                'article_no' => trim((string) ($art['articleNo'] ?? '')),
+                'name' => trim((string) ($art['articleProductName'] ?? '')),
+                'image_urls' => $this->collectAllImageUrlsForArticle($aid, $art, $analogDetail),
+                'fits_same_oem_vehicle_applicability' => $matchesSame,
+                'compatibility_all' => $allCarsNorm,
+            ];
+        }
+
+        $main = $categoryParts['main'];
+        $sub = $categoryParts['sub'];
+        $full = trim($main.($sub !== '' ? ' > '.$sub : ''));
+
+        return [
+            'oem' => $articleOemNo,
+            'locale' => 'ru',
+            'category' => [
+                'main' => $main,
+                'sub' => $sub,
+                'full' => $full,
+            ],
+            'part' => [
+                'article_id' => $articleId,
+                'article_no' => $partArticleNo,
+                'name' => $partName,
+                'supplier_id' => $supplierId,
+                'supplier_name' => $supplierName,
+                'image_urls' => $imageUrls,
+                'image_url_primary' => $imageUrls[0] ?? '',
+                'specifications' => $specifications,
+                'oem_numbers' => $oemNumbers,
+            ],
+            'compatibility' => [
+                'vehicles' => $vehiclesDetailed,
+                'models_summary' => $modelYears,
+            ],
+            'analogs_replacement_same_applicability' => $analogsReplacement,
+            'meta' => [
+                'artlookup_count_articles' => isset($crossRaw['countArticles']) && is_numeric($crossRaw['countArticles'])
+                    ? (int) $crossRaw['countArticles']
+                    : null,
+                'artlookup_articles_total' => count($articles),
+                'analogs_with_same_vehicle_match' => count($analogsReplacement),
+            ],
+            'source_payload' => [
+                'category_raw' => $categoryRaw,
+                'oem_search_rows' => $oemRows,
+                'primary_article_detail_raw' => $primaryDetail,
+            ],
+        ];
+    }
+
+    /**
+     * Преобразует результат {@see lookupFullOemBundleForPersistence} в формат {@see lookupEnrichedForStock}
+     * для повторного использования без запросов к API (импорт из JSONL).
+     *
+     * @param  array<string, mixed>  $bundle
+     * @return array{
+     *   source: 'oem'|'none',
+     *   category_main: string,
+     *   category_sub: string,
+     *   category_raw: array<string, mixed>|null,
+     *   oem_suppliers: list<array{supplierId: int, supplierName: string, articleNo: string|null, articleId: int|null}>,
+     *   cross_analogs: list<array{supplierName: string, articleNo: string, crossManufacturerName: string|null, crossNumber: string|null, searchLevel: string}>,
+     *   vehicles_normalized: list<array{make: string, model: string, body_type: string, year_from: int|null, year_to: int|null, engine: string}>,
+     *   vehicles_raw: null,
+     *   first_article_id: int|null,
+     *   first_article_name: string,
+     *   manufacturer_id: int|null,
+     *   catalog_image_url: string,
+     * }
+     */
+    public function enrichmentPayloadFromFullOemBundle(array $bundle): array
+    {
+        $payload = $bundle['source_payload'] ?? null;
+        $oemRows = is_array($payload) && isset($payload['oem_search_rows']) && is_array($payload['oem_search_rows'])
+            ? $payload['oem_search_rows']
+            : [];
+        if (! array_is_list($oemRows) || $oemRows === []) {
+            return $this->emptyEnrichmentPayload();
+        }
+
+        $cat = $bundle['category'] ?? null;
+        $main = '';
+        $sub = '';
+        if (is_array($cat)) {
+            $main = trim((string) ($cat['main'] ?? ''));
+            $sub = trim((string) ($cat['sub'] ?? ''));
+        }
+
+        $categoryRaw = is_array($payload) && isset($payload['category_raw']) && is_array($payload['category_raw'])
+            ? $payload['category_raw']
+            : null;
+
+        $vehNorm = [];
+        $compat = $bundle['compatibility'] ?? null;
+        $vehList = is_array($compat) && isset($compat['vehicles']) && is_array($compat['vehicles'])
+            ? $compat['vehicles']
+            : [];
+        foreach ($vehList as $v) {
+            if (! is_array($v)) {
+                continue;
+            }
+            $make = trim((string) ($v['make'] ?? ''));
+            $model = trim((string) ($v['model'] ?? ''));
+            if ($make === '' || $model === '') {
+                continue;
+            }
+            $yf = $v['year_from'] ?? null;
+            $yt = $v['year_to'] ?? null;
+            $vehNorm[] = [
+                'make' => $make,
+                'model' => $model,
+                'body_type' => trim((string) ($v['body_type'] ?? '')),
+                'year_from' => is_numeric($yf) ? (int) $yf : null,
+                'year_to' => is_numeric($yt) ? (int) $yt : null,
+                'engine' => trim((string) ($v['engine'] ?? '')),
+            ];
+        }
+
+        $crossAnalogs = [];
+        $analogs = $bundle['analogs_replacement_same_applicability'] ?? null;
+        if (is_array($analogs) && array_is_list($analogs)) {
+            foreach ($analogs as $a) {
+                if (! is_array($a)) {
+                    continue;
+                }
+                $an = trim((string) ($a['article_no'] ?? ''));
+                if ($an === '') {
+                    continue;
+                }
+                $sn = trim((string) ($a['supplier_name'] ?? ''));
+                $crossAnalogs[] = [
+                    'supplierName' => $sn,
+                    'articleNo' => $an,
+                    'crossManufacturerName' => $sn !== '' ? $sn : null,
+                    'crossNumber' => $an,
+                    'searchLevel' => 'oem_bundle',
+                ];
+            }
+        }
+
+        $part = $bundle['part'] ?? [];
+        $part = is_array($part) ? $part : [];
+        $urls = isset($part['image_urls']) && is_array($part['image_urls']) ? $part['image_urls'] : [];
+        $primary = trim((string) ($part['image_url_primary'] ?? ''));
+        if ($primary === '' && $urls !== []) {
+            $first = $urls[0] ?? null;
+            $primary = is_string($first) ? trim($first) : '';
+        }
+
+        $firstArticleId = isset($part['article_id']) && is_numeric($part['article_id'])
+            ? (int) $part['article_id']
+            : null;
+
+        $firstOem = $oemRows[0] ?? null;
+        $manufacturerId = null;
+        if (is_array($firstOem) && isset($firstOem['manufacturerId']) && is_numeric($firstOem['manufacturerId'])) {
+            $manufacturerId = (int) $firstOem['manufacturerId'];
+        }
+
+        return [
+            'source' => 'oem',
+            'category_main' => $main,
+            'category_sub' => $sub,
+            'category_raw' => $categoryRaw,
+            'oem_suppliers' => $this->uniqueSuppliersFromOemRows($oemRows),
+            'cross_analogs' => $crossAnalogs,
+            'vehicles_normalized' => $vehNorm,
+            'vehicles_raw' => null,
+            'first_article_id' => $firstArticleId,
+            'first_article_name' => trim((string) ($part['name'] ?? '')),
+            'manufacturer_id' => $manufacturerId,
+            'catalog_image_url' => $primary,
+        ];
+    }
+
+    /**
+     * @param  array<int, mixed>  $oemSearchRows
+     * @return list<array<string, mixed>>
+     */
+    protected function collectOemRawApplicabilityRows(string $articleOemNo, array $oemSearchRows): array
+    {
+        $manufacturerIds = [];
+        foreach ($oemSearchRows as $row) {
+            if (! is_array($row)) {
+                continue;
+            }
+            $mid = $row['manufacturerId'] ?? null;
+            if (is_numeric($mid)) {
+                $manufacturerIds[(int) $mid] = true;
+            }
+        }
+        $manufacturerIds = array_keys($manufacturerIds);
+        if ($manufacturerIds === []) {
+            return [];
+        }
+
+        $typeId = (int) config('services.auto_parts_catalog.vehicle_type_id');
+        $langId = (int) config('services.auto_parts_catalog.lang_id');
+        $countryId = (int) config('services.auto_parts_catalog.country_filter_id');
+        $oemEnc = rawurlencode($articleOemNo);
+
+        $paths = [];
+        foreach ($manufacturerIds as $manufacturerId) {
+            $paths['v_'.$manufacturerId] = '/articles-oem/selecting-a-list-of-cars-for-oem-part-number'
+                ."/type-id/{$typeId}/lang-id/{$langId}/country-filter-id/{$countryId}"
+                ."/manufacturer-id/{$manufacturerId}/article-oem-no/{$oemEnc}";
+        }
+
+        $responses = $this->rapidApiPoolGet($paths);
+        $all = [];
+        foreach ($responses as $payload) {
+            if (! is_array($payload)) {
+                continue;
+            }
+            $vehicleRows = isset($payload['data']) && is_array($payload['data']) ? $payload['data'] : $payload;
+            if (! is_array($vehicleRows) || ! array_is_list($vehicleRows)) {
+                continue;
+            }
+            foreach ($vehicleRows as $vehicleRow) {
+                if (is_array($vehicleRow)) {
+                    $all[] = $vehicleRow;
+                }
+            }
+        }
+
+        return $all;
+    }
+
+    /**
+     * @param  array<string, mixed>|null  $crossRaw
+     * @return array<int, mixed>
+     */
+    protected function extractArtlookupArticlesArray(?array $crossRaw): array
+    {
+        if ($crossRaw === null || ! isset($crossRaw['articles']) || ! is_array($crossRaw['articles'])) {
+            return [];
+        }
+        $articles = $crossRaw['articles'];
+
+        return array_is_list($articles) ? $articles : [];
+    }
+
+    /**
+     * @param  array<string, mixed>  $payload
+     * @return array<int, mixed>
+     */
+    protected function extractCompatibleCarsFromArticleLikePayload(array $payload): array
+    {
+        foreach (['compatibleCars', 'compatible_cars', 'vehicles', 'vehicleList'] as $key) {
+            if (isset($payload[$key]) && is_array($payload[$key]) && array_is_list($payload[$key])) {
+                return $payload[$key];
+            }
+        }
+        if (isset($payload['articleInfo']) && is_array($payload['articleInfo'])) {
+            $inner = $this->extractCompatibleCarsFromArticleLikePayload($payload['articleInfo']);
+            if ($inner !== []) {
+                return $inner;
+            }
+        }
+
+        return [];
+    }
+
+    /**
+     * Из ответа вида countArticles + articles[], где у элемента есть compatibleCars (плейграунд RapidAPI, эндпоинт get-compatible-cars-by-article-number).
+     *
+     * @param  array<string, mixed>|null  $payload
+     * @return array<int, mixed>
+     */
+    protected function extractCompatibleCarsFromArticlesBulkResponse(?array $payload, ?int $preferArticleId = null): array
+    {
+        if ($payload === null || ! isset($payload['articles']) || ! is_array($payload['articles'])) {
+            return [];
+        }
+        $articles = $payload['articles'];
+        if (! array_is_list($articles)) {
+            return [];
+        }
+        $fallback = [];
+        foreach ($articles as $row) {
+            if (! is_array($row)) {
+                continue;
+            }
+            $cars = $this->extractCompatibleCarsFromArticleLikePayload($row);
+            if ($cars === []) {
+                continue;
+            }
+            if ($preferArticleId !== null && isset($row['articleId']) && is_numeric($row['articleId']) && (int) $row['articleId'] === $preferArticleId) {
+                return $cars;
+            }
+            if ($fallback === []) {
+                $fallback = $cars;
+            }
+        }
+
+        return $fallback;
+    }
+
+    /**
+     * Пути из .env: RAPIDAPI_AUTO_PARTS_ARTICLE_DETAIL_PATHS_EXTRA через «|», плейсхолдеры {articleId}, {langId}.
+     *
+     * @return list<string>
+     */
+    protected function articleDetailPathExtraFromConfig(int $articleId, int $langId): array
+    {
+        $raw = trim((string) config('services.auto_parts_catalog.article_detail_paths_extra', ''));
+        if ($raw === '') {
+            return [];
+        }
+        $out = [];
+        foreach (preg_split('/\|+/', $raw) ?: [] as $chunk) {
+            $p = trim($chunk);
+            if ($p === '') {
+                continue;
+            }
+            $p = str_replace(
+                ['{articleId}', '{langId}'],
+                [(string) $articleId, (string) $langId],
+                $p
+            );
+            if (! str_starts_with($p, '/')) {
+                $p = '/'.$p;
+            }
+            $out[] = $p;
+        }
+
+        return $out;
+    }
+
+    /**
+     * @param  array<string, mixed>  $json
+     */
+    protected function articleDetailPayloadHasUsableArticleInfo(array $json): bool
+    {
+        $info = $json['articleInfo'] ?? $json['article'] ?? null;
+        if (! is_array($info)) {
+            return false;
+        }
+        $specs = $info['allSpecifications'] ?? null;
+        if (is_array($specs) && $specs !== []) {
+            return true;
+        }
+        $oem = $info['oemNo'] ?? null;
+
+        return is_array($oem) && $oem !== [];
+    }
+
+    /**
+     * «Достаточный» ответ: либо применимость к авто, либо нормальная карточка (характеристики / OEM-номера).
+     *
+     * @param  array<string, mixed>  $json
+     */
+    protected function articleDetailPayloadIsAdequate(array $json): bool
+    {
+        if ($this->extractCompatibleCarsFromArticleLikePayload($json) !== []) {
+            return true;
+        }
+        if ($this->extractCompatibleCarsFromArticlesBulkResponse($json, null) !== []) {
+            return true;
+        }
+
+        return $this->articleDetailPayloadHasUsableArticleInfo($json);
+    }
+
+    /**
+     * @param  array<string, mixed>  $json
+     */
+    protected function scoreArticleDetailPayload(array $json): int
+    {
+        $score = 0;
+        $cars = $this->extractCompatibleCarsFromArticleLikePayload($json);
+        if ($cars === []) {
+            $cars = $this->extractCompatibleCarsFromArticlesBulkResponse($json, null);
+        }
+        if ($cars !== []) {
+            $score += 80 + min(count($cars), 40);
+        }
+        if ($this->articleDetailPayloadHasUsableArticleInfo($json)) {
+            $score += 50;
+        }
+        if (isset($json['articleInfo']) && is_array($json['articleInfo'])) {
+            $score += 5;
+        }
+        if (isset($json['articleNo']) && is_string($json['articleNo']) && trim($json['articleNo']) !== '') {
+            $score += 2;
+        }
+        if (isset($json['eanNo']) || isset($json['eanNumbers'])) {
+            $score += 3;
+        }
+
+        return $score;
+    }
+
+    /**
+     * @return list<string>
+     */
+    protected function articleDetailFetchCandidatePaths(int $articleId, int $langId): array
+    {
+        $typeId = (int) config('services.auto_parts_catalog.vehicle_type_id');
+        $countryId = (int) config('services.auto_parts_catalog.country_filter_id');
+        $builtIn = [
+            "/articles/details/article-id/{$articleId}/lang-id/{$langId}",
+            "/articles/article-complete-details/type-id/{$typeId}/article-id/{$articleId}/lang-id/{$langId}/country-filter-id/{$countryId}",
+            "/articles/get-article-all-information/article-id/{$articleId}/lang-id/{$langId}",
+            "/articles/get-all-article-information/article-id/{$articleId}/lang-id/{$langId}",
+            "/articles/get-all-informations/article-id/{$articleId}/lang-id/{$langId}",
+            "/articles/get-article-all-informing/article-id/{$articleId}/lang-id/{$langId}",
+            "/articles/get-all-article-informing/article-id/{$articleId}/lang-id/{$langId}",
+            "/articles/get-article-full-details/article-id/{$articleId}/lang-id/{$langId}",
+            "/articles/get-article-all-details/article-id/{$articleId}/lang-id/{$langId}",
+            "/articles/get-article-details/article-id/{$articleId}/lang-id/{$langId}",
+            "/articles/get-article-by-article-id/article-id/{$articleId}/lang-id/{$langId}",
+            "/articles/get-article-by-id/article-id/{$articleId}/lang-id/{$langId}",
+            "/articles/article-details/article-id/{$articleId}/lang-id/{$langId}",
+        ];
+        $merged = array_merge(
+            $this->articleDetailPathExtraFromConfig($articleId, $langId),
+            $builtIn
+        );
+        $seen = [];
+        $uniq = [];
+        foreach ($merged as $p) {
+            if (isset($seen[$p])) {
+                continue;
+            }
+            $seen[$p] = true;
+            $uniq[] = $p;
+        }
+
+        return $uniq;
+    }
+
+    /**
+     * Подбор JSON карточки артикула: несколько возможных маршрутов RapidAPI, приоритет ответам с compatibleCars и articleInfo.
+     *
+     * @return array<string, mixed>|null
+     */
+    protected function tryFetchArticleDetailsPayload(int $articleId, ?int $langId = null): ?array
+    {
+        $langId ??= (int) config('services.auto_parts_catalog.lang_id');
+        $candidates = $this->articleDetailFetchCandidatePaths($articleId, $langId);
+
+        $best = null;
+        $bestScore = -1;
+        foreach ($candidates as $path) {
+            $json = $this->tryGetJson($path);
+            if ($json === null || $json === []) {
+                continue;
+            }
+            if ($this->articleDetailPayloadIsAdequate($json)) {
+                return $json;
+            }
+            $sc = $this->scoreArticleDetailPayload($json);
+            if ($sc > $bestScore) {
+                $bestScore = $sc;
+                $best = $json;
+            }
+        }
+
+        return $best;
+    }
+
+    /**
+     * GET /articles/get-compatible-cars-by-article-number/type-id/…/article-no/… — в articles[] приходит compatibleCars (как в плейграунде c0ea4c09…).
+     *
+     * @return array<string, mixed>|null
+     */
+    protected function tryGetCompatibleCarsByArticleNumber(string $articleNo, ?int $supplierId, ?int $langId = null): ?array
+    {
+        $articleNo = trim($articleNo);
+        if ($articleNo === '' || ! $this->isConfigured()) {
+            return null;
+        }
+        $langId ??= (int) config('services.auto_parts_catalog.lang_id');
+        $typeId = (int) config('services.auto_parts_catalog.vehicle_type_id');
+        $countryId = (int) config('services.auto_parts_catalog.country_filter_id');
+        $enc = rawurlencode($articleNo);
+        $paths = [];
+        if ($supplierId !== null && $supplierId > 0) {
+            $paths[] = '/articles/get-compatible-cars-by-article-number/type-id/'.$typeId
+                .'/article-no/'.$enc.'/supplier-id/'.$supplierId
+                .'/lang-id/'.$langId.'/country-filter-id/'.$countryId;
+        }
+        $paths[] = '/articles/get-compatible-cars-by-article-number/type-id/'.$typeId
+            .'/article-no/'.$enc.'/lang-id/'.$langId.'/country-filter-id/'.$countryId;
+
+        foreach ($paths as $path) {
+            $json = $this->tryGetJson($path);
+            if ($json === null || $json === []) {
+                continue;
+            }
+            if (isset($json['articles']) && is_array($json['articles']) && $json['articles'] !== []) {
+                return $json;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * @return list<string>
+     */
+    protected function tryFetchArticleMediaUrlList(int $articleId, ?int $langId = null): array
+    {
+        $langId ??= (int) config('services.auto_parts_catalog.lang_id');
+        $candidates = [
+            "/articles/get-article-all-media/article-id/{$articleId}/lang-id/{$langId}",
+            "/articles/get-all-article-media/article-id/{$articleId}/lang-id/{$langId}",
+            "/articles/get-article-media/article-id/{$articleId}/lang-id/{$langId}",
+            "/articles/article-media/article-id/{$articleId}/lang-id/{$langId}",
+        ];
+        foreach ($candidates as $path) {
+            $json = $this->tryGetJson($path);
+            if ($json === null) {
+                continue;
+            }
+            $urls = $this->extractHttpUrlsFromMediaPayload($json);
+            if ($urls !== []) {
+                return $urls;
+            }
+        }
+
+        return [];
+    }
+
+    /**
+     * @param  array<string, mixed>|null  $detailPayload
+     * @return list<string>
+     */
+    protected function collectAllImageUrlsForArticle(?int $articleId, array $oemOrArticleRow, ?array $detailPayload = null): array
+    {
+        $urls = [];
+        $push = function (string $u) use (&$urls): void {
+            $u = trim($u);
+            if ($u === '' || ! str_starts_with($u, 'http')) {
+                return;
+            }
+            foreach ($urls as $existing) {
+                if ($existing === $u) {
+                    return;
+                }
+            }
+            $urls[] = $u;
+        };
+
+        foreach ($this->extractHttpUrlsFromMediaPayload($oemOrArticleRow) as $u) {
+            $push($u);
+        }
+        if ($detailPayload !== null) {
+            foreach ($this->extractHttpUrlsFromMediaPayload($detailPayload) as $u) {
+                $push($u);
+            }
+        }
+        if ($articleId !== null) {
+            foreach ($this->tryFetchArticleMediaUrlList($articleId) as $u) {
+                $push($u);
+            }
+        }
+
+        return $urls;
+    }
+
+    /**
+     * @return list<string>
+     */
+    protected function extractHttpUrlsFromMediaPayload(mixed $payload): array
+    {
+        if (! is_array($payload)) {
+            return [];
+        }
+        $out = [];
+        $walk = function (mixed $node, int $depth) use (&$walk, &$out): void {
+            if ($depth > 14) {
+                return;
+            }
+            if (is_string($node)) {
+                $t = trim($node);
+                if (str_starts_with($t, 'http') && (str_contains($t, 'webp') || str_contains($t, 'jpg') || str_contains($t, 'jpeg') || str_contains($t, 'png'))) {
+                    $out[] = $t;
+                }
+
+                return;
+            }
+            if (! is_array($node)) {
+                return;
+            }
+            foreach (['s3image', 's3Image', 's3_image', 'imageUrl', 'imageURL', 'url'] as $k) {
+                if (isset($node[$k]) && is_string($node[$k])) {
+                    $t = trim($node[$k]);
+                    if (str_starts_with($t, 'http')) {
+                        $out[] = $t;
+                    }
+                }
+            }
+            foreach ($node as $v) {
+                if (is_array($v)) {
+                    $walk($v, $depth + 1);
+                }
+            }
+        };
+        $walk($payload, 0);
+
+        $uniq = [];
+        $ordered = [];
+        foreach ($out as $u) {
+            if (isset($uniq[$u])) {
+                continue;
+            }
+            $uniq[$u] = true;
+            $ordered[] = $u;
+        }
+
+        return $ordered;
+    }
+
+    /**
+     * @param  array<string, mixed>  $row
+     * @return array<string, mixed>
+     */
+    public function normalizeVehicleApplicabilityForDb(array $row): array
+    {
+        $make = $this->pickStringFrom($row, [
+            'vehicleManufacturerName',
+            'manufacturerName',
+            'manuName',
+            'makeName',
+        ]);
+        $model = $this->pickStringFrom($row, [
+            'vehicleModelName',
+            'modelName',
+            'modelNameShort',
+        ]);
+        $body = $this->pickStringFrom($row, [
+            'bodyType',
+            'constructionTypeName',
+            'bodyTypeName',
+            'bodyTypeNameShort',
+            'vehicleBodyTypeName',
+        ]);
+        $typeEngine = $this->pickStringFrom($row, [
+            'typeEngineName',
+            'engineType',
+        ]);
+        $engineCore = $this->formatEngineFromRow($row);
+        $engine = trim(
+            $typeEngine !== ''
+                ? $typeEngine.($engineCore !== '' ? ', '.$engineCore : '')
+                : $engineCore,
+            " \t\n\r\0\x0B,"
+        );
+
+        $cStart = $this->pickStringFrom($row, ['constructionIntervalStart', 'constructionFrom']);
+        $cEnd = $this->pickStringFrom($row, ['constructionIntervalEnd', 'constructionTo']);
+
+        $yearFrom = $this->pickIntFrom($row, ['yearOfConstructionFrom', 'yearFrom', 'constructionFrom']);
+        $yearTo = $this->pickIntFrom($row, ['yearOfConstructionTo', 'yearTo', 'constructionTo']);
+        if ($yearFrom === null && $cStart !== '') {
+            $yearFrom = $this->extractYearFromDateString($cStart);
+        }
+        if ($yearTo === null && $cEnd !== '') {
+            $yearTo = $this->extractYearFromDateString($cEnd);
+        }
+
+        $vehicleId = isset($row['vehicleId']) && is_numeric($row['vehicleId']) ? (int) $row['vehicleId'] : null;
+        $modelId = isset($row['modelId']) && is_numeric($row['modelId']) ? (int) $row['modelId'] : null;
+
+        return [
+            'vehicle_id' => $vehicleId,
+            'model_id' => $modelId,
+            'make' => $make,
+            'model' => $model,
+            'body_type' => $body,
+            'type_engine_name' => $typeEngine,
+            'engine' => $engine,
+            'construction_interval_start' => $cStart !== '' ? $cStart : null,
+            'construction_interval_end' => $cEnd !== '' ? $cEnd : null,
+            'year_from' => $yearFrom,
+            'year_to' => $yearTo,
+        ];
+    }
+
+    protected function extractYearFromDateString(string $value): ?int
+    {
+        $value = trim($value);
+        if ($value === '') {
+            return null;
+        }
+        if (preg_match('/^(\d{4})/', $value, $m) === 1) {
+            return (int) $m[1];
+        }
+
+        return null;
+    }
+
+    /**
+     * @param  array<string, mixed>  $norm
+     */
+    protected function vehicleApplicabilityFingerprint(array $norm): string
+    {
+        $parts = [
+            (string) ($norm['vehicle_id'] ?? ''),
+            mb_strtolower((string) ($norm['make'] ?? '')),
+            mb_strtolower((string) ($norm['model'] ?? '')),
+            mb_strtolower((string) ($norm['body_type'] ?? '')),
+            mb_strtolower((string) ($norm['type_engine_name'] ?? '')),
+            (string) ($norm['construction_interval_start'] ?? ''),
+            (string) ($norm['construction_interval_end'] ?? ''),
+        ];
+
+        return implode("\0", $parts);
+    }
+
+    /**
+     * @param  list<array<string, mixed>>  $rawRows
+     * @return array{vehicle_ids: list<int>, intervals: list<array{make: string, model: string, body: string, engine: string, start: Carbon|null, end: Carbon|null}>}
+     */
+    protected function buildOemApplicabilityIndex(array $rawRows): array
+    {
+        $vehicleIds = [];
+        $intervals = [];
+        foreach ($rawRows as $row) {
+            if (! is_array($row)) {
+                continue;
+            }
+            if (isset($row['vehicleId']) && is_numeric($row['vehicleId'])) {
+                $vehicleIds[] = (int) $row['vehicleId'];
+            }
+            $make = mb_strtolower($this->pickStringFrom($row, ['vehicleManufacturerName', 'manufacturerName', 'manuName']));
+            $model = mb_strtolower($this->pickStringFrom($row, ['vehicleModelName', 'modelName']));
+            $body = mb_strtolower($this->pickStringFrom($row, ['bodyType', 'constructionTypeName', 'bodyTypeName', 'vehicleBodyTypeName']));
+            $engine = mb_strtolower($this->pickStringFrom($row, ['typeEngineName', 'engineType']));
+            $s = $this->pickStringFrom($row, ['constructionIntervalStart', 'constructionFrom']);
+            $e = $this->pickStringFrom($row, ['constructionIntervalEnd', 'constructionTo']);
+            $start = $this->tryParseCatalogDate($s);
+            $end = $this->tryParseCatalogDate($e);
+            if ($make === '' && $model === '') {
+                continue;
+            }
+            $intervals[] = [
+                'make' => $make,
+                'model' => $model,
+                'body' => $body,
+                'engine' => $engine,
+                'start' => $start,
+                'end' => $end,
+            ];
+        }
+
+        $vehicleIds = array_values(array_unique($vehicleIds));
+
+        return [
+            'vehicle_ids' => $vehicleIds,
+            'intervals' => $intervals,
+        ];
+    }
+
+    protected function tryParseCatalogDate(string $value): ?Carbon
+    {
+        $value = trim($value);
+        if ($value === '') {
+            return null;
+        }
+        try {
+            return Carbon::parse($value)->startOfDay();
+        } catch (\Throwable) {
+            return null;
+        }
+    }
+
+    /**
+     * @param  array<string, mixed>  $car
+     * @param  array{vehicle_ids: list<int>, intervals: list<array<string, mixed>>}  $oemIndex
+     */
+    protected function compatibleCarMatchesOemIndex(array $car, array $oemIndex): bool
+    {
+        if (isset($car['vehicleId']) && is_numeric($car['vehicleId'])) {
+            $vid = (int) $car['vehicleId'];
+            foreach ($oemIndex['vehicle_ids'] as $allowed) {
+                if ($vid === $allowed) {
+                    return true;
+                }
+            }
+        }
+
+        $cMake = mb_strtolower($this->pickStringFrom($car, ['vehicleManufacturerName', 'manufacturerName', 'manuName']));
+        $cModel = mb_strtolower($this->pickStringFrom($car, ['vehicleModelName', 'modelName']));
+        $cBody = mb_strtolower($this->pickStringFrom($car, ['bodyType', 'constructionTypeName', 'bodyTypeName', 'vehicleBodyTypeName']));
+        $cEngine = mb_strtolower($this->pickStringFrom($car, ['typeEngineName', 'engineType']));
+        $s = $this->pickStringFrom($car, ['constructionIntervalStart', 'constructionFrom']);
+        $e = $this->pickStringFrom($car, ['constructionIntervalEnd', 'constructionTo']);
+        $cStart = $this->tryParseCatalogDate($s);
+        $cEnd = $this->tryParseCatalogDate($e);
+
+        foreach ($oemIndex['intervals'] as $slot) {
+            /** @var Carbon|null $oStart */
+            $oStart = $slot['start'] ?? null;
+            /** @var Carbon|null $oEnd */
+            $oEnd = $slot['end'] ?? null;
+            if (($slot['make'] ?? '') !== '' && $cMake !== '' && $slot['make'] !== $cMake) {
+                continue;
+            }
+            if (($slot['model'] ?? '') !== '' && $cModel !== '' && $slot['model'] !== $cModel) {
+                continue;
+            }
+            if (($slot['body'] ?? '') !== '' && $cBody !== '' && $slot['body'] !== $cBody) {
+                continue;
+            }
+            if (($slot['engine'] ?? '') !== '' && $cEngine !== '' && $slot['engine'] !== $cEngine) {
+                continue;
+            }
+            if ($this->constructionIntervalsOverlap($oStart, $oEnd, $cStart, $cEnd)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    protected function constructionIntervalsOverlap(
+        ?Carbon $aStart,
+        ?Carbon $aEnd,
+        ?Carbon $bStart,
+        ?Carbon $bEnd,
+    ): bool {
+        if ($aStart === null && $bStart === null) {
+            return false;
+        }
+        $aS = $aStart ?? Carbon::create(1900, 1, 1);
+        $aE = $aEnd ?? Carbon::create(2100, 12, 31);
+        $bS = $bStart ?? Carbon::create(1900, 1, 1);
+        $bE = $bEnd ?? Carbon::create(2100, 12, 31);
+        if ($aS->gt($aE)) {
+            [$aS, $aE] = [$aE, $aS];
+        }
+        if ($bS->gt($bE)) {
+            [$bS, $bE] = [$bE, $bS];
+        }
+
+        return ! $aE->lt($bS) && ! $bE->lt($aS);
     }
 
     /**
@@ -747,6 +2275,7 @@ class AutoPartsCatalogService
      *   }>,
      *   vehicles_raw: array<int, mixed>|null,
      *   first_article_id: int|null,
+     *   first_article_name: string,
      *   manufacturer_id: int|null,
      *   catalog_image_url: string,
      * }
@@ -784,6 +2313,7 @@ class AutoPartsCatalogService
                 'vehicles_normalized' => $normalized,
                 'vehicles_raw' => is_array($vehiclesRaw) ? $vehiclesRaw : null,
                 'first_article_id' => $lookup['first_article_id'] ?? null,
+                'first_article_name' => $this->extractFirstArticleNameFromRows($oemList),
                 'manufacturer_id' => $lookup['manufacturer_id'] ?? null,
                 'catalog_image_url' => $imageUrl ?? '',
             ];
@@ -841,6 +2371,7 @@ class AutoPartsCatalogService
             'vehicles_normalized' => [],
             'vehicles_raw' => null,
             'first_article_id' => $firstId,
+            'first_article_name' => $this->extractFirstArticleNameFromRows($rows),
             'manufacturer_id' => null,
             'catalog_image_url' => $imageUrl ?? '',
         ];
@@ -857,6 +2388,7 @@ class AutoPartsCatalogService
      *   vehicles_normalized: list<array{make: string, model: string, body_type: string, year_from: int|null, year_to: int|null, engine: string}>,
      *   vehicles_raw: null,
      *   first_article_id: null,
+     *   first_article_name: string,
      *   manufacturer_id: null,
      *   catalog_image_url: string,
      * }
@@ -873,6 +2405,7 @@ class AutoPartsCatalogService
             'vehicles_normalized' => [],
             'vehicles_raw' => null,
             'first_article_id' => null,
+            'first_article_name' => '',
             'manufacturer_id' => null,
             'catalog_image_url' => '',
         ];
@@ -1076,6 +2609,170 @@ class AutoPartsCatalogService
         ]);
 
         return $raw;
+    }
+
+    /**
+     * @param  array<int, array<string, mixed>>  $vehicleRows
+     * @return list<array{
+     *   modelId: int|null,
+     *   modelName: string,
+     *   modelYearFrom: string|null,
+     *   modelYearTo: string|null
+     * }>
+     */
+    protected function deduplicateModelsWithYears(array $vehicleRows): array
+    {
+        $out = [];
+        $seen = [];
+
+        foreach ($vehicleRows as $row) {
+            $modelIdRaw = $row['modelId'] ?? $row['vehicleModelId'] ?? $row['model_id'] ?? null;
+            $modelId = is_numeric($modelIdRaw) ? (int) $modelIdRaw : null;
+
+            $modelName = trim((string) ($row['modelName'] ?? $row['vehicleModelName'] ?? ''));
+            if ($modelName === '') {
+                continue;
+            }
+
+            $yearFrom = $this->normalizeYearDate($row['modelYearFrom'] ?? $row['yearOfConstructionFrom'] ?? $row['yearFrom'] ?? null);
+            $yearTo = $this->normalizeYearDate($row['modelYearTo'] ?? $row['yearOfConstructionTo'] ?? $row['yearTo'] ?? null);
+
+            $key = ($modelId !== null ? (string) $modelId : 'null')."\0".$modelName."\0".($yearFrom ?? '')."\0".($yearTo ?? '');
+            if (isset($seen[$key])) {
+                continue;
+            }
+            $seen[$key] = true;
+
+            $out[] = [
+                'modelId' => $modelId,
+                'modelName' => $modelName,
+                'modelYearFrom' => $yearFrom,
+                'modelYearTo' => $yearTo,
+            ];
+        }
+
+        usort($out, fn (array $a, array $b): int => strcasecmp($a['modelName'], $b['modelName']));
+
+        return $out;
+    }
+
+    protected function normalizeYearDate(mixed $value): ?string
+    {
+        if ($value === null) {
+            return null;
+        }
+
+        if (is_numeric($value)) {
+            $year = (int) $value;
+            if ($year >= 1900 && $year <= 2999) {
+                return sprintf('%04d-01-01', $year);
+            }
+
+            return null;
+        }
+
+        if (! is_string($value)) {
+            return null;
+        }
+
+        $trimmed = trim($value);
+        if ($trimmed === '') {
+            return null;
+        }
+
+        if (preg_match('/^\d{4}$/', $trimmed) === 1) {
+            return $trimmed.'-01-01';
+        }
+
+        return $trimmed;
+    }
+
+    /**
+     * @param  list<mixed>  $values
+     */
+    protected function pickFirstString(array $values): string
+    {
+        foreach ($values as $value) {
+            if (! is_string($value) && ! is_numeric($value)) {
+                continue;
+            }
+            $s = trim((string) $value);
+            if ($s !== '') {
+                return $s;
+            }
+        }
+
+        return '';
+    }
+
+    /**
+     * @param  list<mixed>  $values
+     */
+    protected function pickFirstInt(array $values): ?int
+    {
+        foreach ($values as $value) {
+            if (is_numeric($value)) {
+                return (int) $value;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * @param  array<int, mixed>  $rows
+     * @return list<array{name: string, value: string}>
+     */
+    protected function normalizePartSpecifications(array $rows): array
+    {
+        $out = [];
+        foreach ($rows as $row) {
+            if (! is_array($row)) {
+                continue;
+            }
+            $name = trim((string) ($row['criteriaName'] ?? ''));
+            $value = trim((string) ($row['criteriaValue'] ?? ''));
+            if ($name === '' || $value === '') {
+                continue;
+            }
+            $out[] = [
+                'name' => $name,
+                'value' => $value,
+            ];
+        }
+
+        return $out;
+    }
+
+    /**
+     * @param  array<int, mixed>  $rows
+     * @return list<array{brand: string, number: string}>
+     */
+    protected function normalizePartOemNumbers(array $rows): array
+    {
+        $out = [];
+        $seen = [];
+        foreach ($rows as $row) {
+            if (! is_array($row)) {
+                continue;
+            }
+            $brand = trim((string) ($row['oemBrand'] ?? ''));
+            $number = trim((string) ($row['oemDisplayNo'] ?? ''));
+            if ($brand === '' || $number === '') {
+                continue;
+            }
+            $key = $brand."\0".$number;
+            if (isset($seen[$key])) {
+                continue;
+            }
+            $seen[$key] = true;
+            $out[] = [
+                'brand' => $brand,
+                'number' => $number,
+            ];
+        }
+
+        return $out;
     }
 
     protected function compactPartNumber(string $s): string

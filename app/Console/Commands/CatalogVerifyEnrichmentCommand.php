@@ -54,7 +54,7 @@ class CatalogVerifyEnrichmentCommand extends Command
 
         $this->info('Что проверяем по каждому артикулу:');
         $this->line(' • категория TecDoc → в импорте: product_attributes + привязка к categories (если есть main/sub);');
-        $this->line(' • URL фото → product_images (скачивание в storage/app/public/products/catalog/…);');
+        $this->line(' • URL фото → product_images (скачивание в storage/app/public/products/…);');
         $this->line(' • кроссы → product_cross_numbers;');
         $this->line(' • марка/модель → vehicles + product_vehicle.');
         $this->newLine();
@@ -70,6 +70,8 @@ class CatalogVerifyEnrichmentCommand extends Command
             } catch (\Throwable $ex) {
                 $rows[] = [
                     $article,
+                    '—',
+                    '—',
                     '—',
                     '—',
                     '—',
@@ -103,6 +105,8 @@ class CatalogVerifyEnrichmentCommand extends Command
             $rows[] = [
                 Str::limit($article, 24),
                 $src,
+                (string) ($e['candidate_used'] ?? '—'),
+                (string) ($e['candidate_score'] ?? '—'),
                 Str::limit($cat, 36),
                 $imgShort,
                 (string) $oemN,
@@ -113,7 +117,7 @@ class CatalogVerifyEnrichmentCommand extends Command
         }
 
         $this->table(
-            ['Артикул', 'Источник', 'Категория', 'Фото', 'OEM строк', 'Кроссов', 'Авто', 'Заметка'],
+            ['Артикул', 'Источник', 'Кандидат', 'Score', 'Категория', 'Фото', 'OEM строк', 'Кроссов', 'Авто', 'Заметка'],
             $rows
         );
 

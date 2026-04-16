@@ -10,5 +10,7 @@ class Dashboard extends BaseDashboard
 
     protected static ?string $navigationLabel = 'Главная';
 
+    protected static ?string $navigationGroup = 'Главная';
+
     protected static ?int $navigationSort = -10;
 }

@@ -3,6 +3,7 @@
 namespace App\Filament\Resources\ProductResource\RelationManagers;
 
 use App\Filament\Support\FilamentSweetAlert;
+use App\Models\Vehicle;
 use Filament\Forms;
 use Filament\Forms\Form;
 use Filament\Resources\RelationManagers\RelationManager;
@@ -22,7 +23,13 @@ class ProductVehiclesRelationManager extends RelationManager
                 Forms\Components\Select::make('vehicle_id')
                     ->label('Автомобиль')
                     ->relationship('vehicle', 'model')
-                    ->getOptionLabelFromRecordUsing(fn ($record): string => trim($record->make . ' ' . $record->model . ' ' . ($record->generation ?? '')))
+                    ->getOptionLabelFromRecordUsing(function (Vehicle $record): string {
+                        $line = $record->shortCompatibilityLabel();
+
+                        return $line !== ''
+                            ? '#'.$record->id.' — '.$line
+                            : '#'.$record->id.' — '.trim($record->make.' '.$record->model);
+                    })
                     ->searchable(['make', 'model', 'generation'])
                     ->preload()
                     ->required(),

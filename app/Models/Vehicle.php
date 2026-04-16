@@ -59,6 +59,69 @@ class Vehicle extends Model
     }
 
     /**
+     * Подпись варианта для подбора на главной: только название модели (без кода поколения TecDoc вроде BT0/1);
+     * в скобках — двигатель, кузов, годы.
+     */
+    public function homePartFinderOptionLabel(): string
+    {
+        $head = self::finderModelLabelWithoutTecdocCodeSuffix(trim((string) $this->model));
+        if ($head === '') {
+            $head = '—';
+        }
+
+        $yf = $this->year_from;
+        $yt = $this->year_to;
+        $yearLabel = '';
+        if ($yf !== null && $yt !== null) {
+            $a = (int) $yf;
+            $b = (int) $yt;
+            if ($a > $b) {
+                [$a, $b] = [$b, $a];
+            }
+            $yearLabel = $a === $b ? (string) $a : $a.'–'.$b;
+        } elseif ($yf !== null) {
+            $yearLabel = 'с '.(int) $yf;
+        } elseif ($yt !== null) {
+            $yearLabel = 'до '.(int) $yt;
+        }
+
+        $engine = $this->engine !== null ? trim((string) $this->engine) : '';
+        $body = $this->body_type !== null ? trim((string) $this->body_type) : '';
+
+        $tail = array_values(array_filter([$engine, $body, $yearLabel], fn (string $s): bool => $s !== ''));
+
+        if ($tail === []) {
+            return $head;
+        }
+
+        return $head.' ('.implode(', ', $tail).')';
+    }
+
+    /**
+     * Убирает хвост вроде « (BT0/1)» в поле model — внутренний код TecDoc, не для покупателя.
+     * Не трогает скобки с текстом вроде «(IV)» или «(Mk7)» (есть строчные буквы).
+     */
+    public static function finderModelLabelWithoutTecdocCodeSuffix(string $model): string
+    {
+        $head = trim($model);
+        for ($i = 0; $i < 4; $i++) {
+            if (preg_match('/^(.*)\s*\(([^)]{2,40})\)\s*$/u', $head, $m) !== 1) {
+                break;
+            }
+            $inner = $m[2];
+            $isTecdocLike = preg_match('/^[A-Z0-9\/]+$/u', $inner) === 1
+                && preg_match('/[A-Z]/', $inner) === 1
+                && (str_contains($inner, '/') || preg_match('/\d/', $inner) === 1);
+            if (! $isTecdocLike) {
+                break;
+            }
+            $head = trim($m[1]);
+        }
+
+        return $head;
+    }
+
+    /**
      * Год или диапазон лет применимости для витрины (вторые скобки после марки/модели).
      * Если в БД нет годов — без суффикса.
      */
@@ -147,18 +210,16 @@ class Vehicle extends Model
     }
 
     /**
-     * Краткая строка для карточки товара: «BMW X5 (2010–2020), универсал, 2.0 TDI».
+     * Краткая строка для карточки товара и каталога: марка, модель (без кода TecDoc вроде BT0/1 и без поля generation),
+     * годы, кузов, двигатель — «Renault Laguna III (2007–2015), Хэтчбек, 2.0 16V Turbo».
      */
     public function shortCompatibilityLabel(): string
     {
         $parts = array_filter([
             trim((string) $this->make),
-            trim((string) $this->model),
+            self::finderModelLabelWithoutTecdocCodeSuffix(trim((string) $this->model)),
         ], fn (string $s) => $s !== '');
         $name = implode(' ', $parts);
-        if ($this->generation !== null && trim((string) $this->generation) !== '') {
-            $name = trim($name.' '.trim((string) $this->generation));
-        }
         if ($name === '') {
             return '';
         }
@@ -362,7 +423,7 @@ class Vehicle extends Model
 
     /**
      * Подпись строки справочника в чекбоксах «записи из справочника» (админка и кабинет продавца).
-     * Диапазон годов включается через {@see shortCompatibilityLabel()} (в скобках после модели/поколения).
+     * Текст как у витрины: {@see shortCompatibilityLabel()} (без внутреннего кода поколения TecDoc).
      */
     public function adminCompatibilityPickerLabel(): string
     {
@@ -371,7 +432,7 @@ class Vehicle extends Model
             return '#'.$this->id.' — '.$line;
         }
 
-        return '#'.$this->id.' — '.trim($this->make.' '.$this->model);
+        return '#'.$this->id.' — '.trim($this->make.' '.self::finderModelLabelWithoutTecdocCodeSuffix(trim((string) $this->model)));
     }
 
     public static function normalizedGeneration(?string $generation): ?string

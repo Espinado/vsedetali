@@ -9,6 +9,8 @@ use App\Models\Setting;
 use App\Models\Vehicle;
 use App\Support\ProductNameVehicleExtractor;
 use App\Support\Seo;
+use App\Support\StorefrontVehicleFilter;
+use App\Support\StorefrontVehicleProductNameConsistency;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Collection;
 use Livewire\Component;
@@ -62,17 +64,17 @@ class ProductGrid extends Component
 
     protected $queryString = [
         'categorySlug' => ['except' => ''],
-        'brandId'      => ['except' => 0],
-        'sort'         => ['except' => 'name_asc'],
-        'search'       => ['except' => ''],
-        'vehicleMake'  => ['except' => ''],
+        'brandId' => ['except' => 0],
+        'sort' => ['except' => 'name_asc'],
+        'search' => ['except' => ''],
+        'vehicleMake' => ['except' => ''],
         'vehicleModel' => ['except' => ''],
-        'vehicleYear'  => ['except' => 0],
-        'vehicleId'    => ['except' => 0],
-        'priceFrom'    => ['except' => ''],
-        'priceTo'      => ['except' => ''],
-        'inStockOnly'  => ['except' => false],
-        'perPage'      => ['except' => 12],
+        'vehicleYear' => ['except' => 0],
+        'vehicleId' => ['except' => 0],
+        'priceFrom' => ['except' => ''],
+        'priceTo' => ['except' => ''],
+        'inStockOnly' => ['except' => false],
+        'perPage' => ['except' => 12],
     ];
 
     /** Значение с формы и из URL всегда приводим к int */
@@ -91,12 +93,17 @@ class ProductGrid extends Component
     {
         $this->perPage = $this->normalizePerPage((int) $this->perPage);
 
+        $vehicleYearFromQuery = $this->vehicleYear > 0 ? (int) $this->vehicleYear : 0;
+
         if ($vehicle !== null) {
             $this->vehiclePageContext = true;
             $this->vehicleId = $vehicle->id;
             $label = $vehicle->shortCompatibilityLabel();
             $this->vehicleLockLabel = $label !== '' ? $label : '';
             $this->applyVehicleToSelectors($vehicle);
+            if ($vehicleYearFromQuery > 0) {
+                $this->vehicleYear = $vehicleYearFromQuery;
+            }
         }
 
         if ($this->isCatalogHiddenCategorySlug($categorySlug)) {
@@ -116,6 +123,9 @@ class ProductGrid extends Component
             if ($found) {
                 $this->vehiclePageContext = true;
                 $this->applyVehicleToSelectors($found);
+                if ($vehicleYearFromQuery > 0) {
+                    $this->vehicleYear = $vehicleYearFromQuery;
+                }
                 $label = $found->shortCompatibilityLabel();
                 $this->vehicleLockLabel = $label !== '' ? $label : '';
             } else {
@@ -245,8 +255,12 @@ class ProductGrid extends Component
         $make = trim($this->vehicleMake);
         $makeLower = mb_strtolower($make);
 
+        $visibleVehicleIds = StorefrontVehicleProductNameConsistency::vehicleIdsWithStorefrontVisibleProductsForMake($make);
+
         $fromDb = Vehicle::query()
             ->whereRaw('LOWER(make) = ?', [$makeLower])
+            ->when($visibleVehicleIds->isNotEmpty(), fn (Builder $q) => $q->whereIn('id', $visibleVehicleIds))
+            ->when($visibleVehicleIds->isEmpty(), fn (Builder $q) => $q->whereRaw('0 = 1'))
             ->whereHas('products', function (Builder $query) {
                 $this->applyProductFilters($query, ['vehicleModel', 'vehicleYear']);
             })
@@ -267,6 +281,11 @@ class ProductGrid extends Component
                 $vq->whereRaw('LOWER(vehicles.make) = ?', [$makeLower]);
                 ProductNameVehicleExtractor::wherePlaceholderVehicleModel($vq, 'vehicles.model');
             })
+            ->get(['id', 'name'])
+            ->filter(fn (Product $p): bool => ! StorefrontVehicleProductNameConsistency::conflictsWithSelectedVehicleMake(
+                (string) $p->name,
+                $make
+            ))
             ->pluck('name')
             ->map(fn (string $n) => ProductNameVehicleExtractor::tailAfterMake($n, $make))
             ->filter()
@@ -337,7 +356,7 @@ class ProductGrid extends Component
         $parts = [$this->vehicleMake];
 
         if ($this->vehicleModel !== '') {
-            $parts[] = $this->vehicleModel;
+            $parts[] = Vehicle::finderModelLabelWithoutTecdocCodeSuffix($this->vehicleModel);
         }
 
         if ($this->vehicleYear > 0) {
@@ -380,14 +399,14 @@ class ProductGrid extends Component
         $brandSubquery = '(SELECT name FROM brands WHERE brands.id = products.brand_id)';
 
         match ($this->sort) {
-            'price_asc'  => $query->orderBy('price'),
+            'price_asc' => $query->orderBy('price'),
             'price_desc' => $query->orderByDesc('price'),
-            'name_asc'   => $query->orderBy('name'),
-            'name_desc'  => $query->orderByDesc('name'),
-            'newest'     => $query->orderByDesc('created_at'),
-            'brand_asc'  => $query->orderByRaw("{$brandSubquery} ASC"),
+            'name_asc' => $query->orderBy('name'),
+            'name_desc' => $query->orderByDesc('name'),
+            'newest' => $query->orderByDesc('created_at'),
+            'brand_asc' => $query->orderByRaw("{$brandSubquery} ASC"),
             'brand_desc' => $query->orderByRaw("{$brandSubquery} DESC"),
-            default     => $query->orderBy('name'),
+            default => $query->orderBy('name'),
         };
 
         return $query->paginate($this->normalizePerPage((int) $this->perPage));
@@ -404,33 +423,30 @@ class ProductGrid extends Component
             ->when(! in_array('brand', $except, true) && $brandId > 0, fn (Builder $q) => $q->where('brand_id', $brandId))
             ->when(! in_array('vehicleMake', $except, true), function (Builder $q) use ($vehicleYear, $except) {
                 if ($this->vehicleId > 0) {
-                    $q->whereHas('vehicles', function (Builder $vehicleQuery) use ($vehicleYear, $except) {
-                        $vehicleQuery->where('vehicles.id', $this->vehicleId)
-                            ->when(! in_array('vehicleYear', $except, true) && $vehicleYear > 0, function (Builder $yq) use ($vehicleYear): void {
-                                self::applyVehicleYearConstraintForProductVehicleLink($yq, $vehicleYear);
-                            });
-                    });
+                    $yearForEligible = (! in_array('vehicleYear', $except, true) && $vehicleYear > 0) ? $vehicleYear : 0;
+                    $ids = StorefrontVehicleProductNameConsistency::eligibleActiveProductIdsForVehicle(
+                        $this->vehicleId,
+                        $this->vehicleMake,
+                        $yearForEligible
+                    );
+                    if ($ids->isEmpty()) {
+                        $q->whereRaw('0 = 1');
+                    } else {
+                        $q->whereIn('products.id', $ids);
+                    }
                 } elseif ($this->vehicleMake !== '') {
                     $q->whereHas('vehicles', function (Builder $vehicleQuery) use ($vehicleYear, $except) {
-                        $makeLower = mb_strtolower(trim($this->vehicleMake));
-                        $vehicleQuery->whereRaw('LOWER(vehicles.make) = ?', [$makeLower])
-                            ->when(! in_array('vehicleModel', $except, true) && $this->vehicleModel !== '', function (Builder $modelQuery) use ($makeLower) {
-                                $modelLower = mb_strtolower(trim($this->vehicleModel));
-                                $likeMake = ProductNameVehicleExtractor::sqlLikeContains(trim($this->vehicleMake));
-                                $likeModel = ProductNameVehicleExtractor::sqlLikeContains(trim($this->vehicleModel));
-                                $modelQuery->where(function (Builder $w) use ($makeLower, $modelLower, $likeMake, $likeModel) {
-                                    $w->whereRaw('LOWER(TRIM(vehicles.model)) = ?', [$modelLower])
-                                        ->orWhere(function (Builder $inner) use ($makeLower, $likeMake, $likeModel) {
-                                            $inner->whereRaw('LOWER(vehicles.make) = ?', [$makeLower]);
-                                            ProductNameVehicleExtractor::wherePlaceholderVehicleModel($inner, 'vehicles.model');
-                                            $inner->whereRaw('LOWER(products.name) LIKE ?', [$likeMake])
-                                                ->whereRaw('LOWER(products.name) LIKE ?', [$likeModel]);
-                                        });
-                                });
-                            })
-                            ->when(! in_array('vehicleYear', $except, true) && $vehicleYear > 0, function (Builder $yearQuery) use ($vehicleYear): void {
-                                self::applyVehicleYearConstraintForProductVehicleLink($yearQuery, $vehicleYear);
-                            });
+                        $modelForFilter = in_array('vehicleModel', $except, true)
+                            ? ''
+                            : trim((string) $this->vehicleModel);
+                        StorefrontVehicleFilter::constrainVehiclesByMakeAndOptionalModel(
+                            $vehicleQuery,
+                            trim($this->vehicleMake),
+                            $modelForFilter
+                        );
+                        if (! in_array('vehicleYear', $except, true) && $vehicleYear > 0) {
+                            StorefrontVehicleFilter::applyVehicleYearConstraintForProductVehicleLink($vehicleQuery, $vehicleYear);
+                        }
                     });
                 }
             })
@@ -442,7 +458,7 @@ class ProductGrid extends Component
                 });
             })
             ->when(! in_array('search', $except, true) && $search !== '', function (Builder $q) use ($search) {
-                $term = '%' . $search . '%';
+                $term = '%'.$search.'%';
                 $q->where(function (Builder $q) use ($term) {
                     $q->where('name', 'like', $term)
                         ->orWhere('sku', 'like', $term)
@@ -455,30 +471,6 @@ class ProductGrid extends Component
                         });
                 });
             });
-    }
-
-    /**
-     * Год с витрины сопоставляем с привязкой: при заданных compat_year_* в pivot они главнее диапазона записи ТС.
-     */
-    protected static function applyVehicleYearConstraintForProductVehicleLink(Builder $vehicleQuery, int $vehicleYear): void
-    {
-        $vehicleQuery->where(function (Builder $w) use ($vehicleYear): void {
-            $w->where(function (Builder $p) use ($vehicleYear): void {
-                $p->whereNotNull('product_vehicle.compat_year_from')
-                    ->whereNotNull('product_vehicle.compat_year_to')
-                    ->where('product_vehicle.compat_year_from', '<=', $vehicleYear)
-                    ->where('product_vehicle.compat_year_to', '>=', $vehicleYear);
-            })->orWhere(function (Builder $v) use ($vehicleYear): void {
-                $v->where(function (Builder $pv): void {
-                    $pv->whereNull('product_vehicle.compat_year_from')
-                        ->orWhereNull('product_vehicle.compat_year_to');
-                })->where(function (Builder $rangeQuery) use ($vehicleYear): void {
-                    $rangeQuery->whereNull('vehicles.year_from')->orWhere('vehicles.year_from', '<=', $vehicleYear);
-                })->where(function (Builder $rangeQuery) use ($vehicleYear): void {
-                    $rangeQuery->whereNull('vehicles.year_to')->orWhere('vehicles.year_to', '>=', $vehicleYear);
-                });
-            });
-        });
     }
 
     public function updatedCategorySlug(): void

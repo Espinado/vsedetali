@@ -4,9 +4,10 @@ namespace App\Livewire\Storefront;
 
 use App\Models\Category;
 use App\Models\Product;
+use App\Models\ProductCrossNumber;
 use App\Models\Vehicle;
-use App\Support\ProductNameVehicleExtractor;
 use App\Support\StorefrontVehicleFilter;
+use App\Support\StorefrontVehicleProductNameConsistency;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Collection;
 use Livewire\Component;
@@ -14,10 +15,6 @@ use Livewire\Component;
 class HomePartFinder extends Component
 {
     public string $vehicleMake = '';
-
-    public string $vehicleModel = '';
-
-    public int $vehicleYear = 0;
 
     public int $categoryId = 0;
 
@@ -30,8 +27,6 @@ class HomePartFinder extends Component
 
     protected $queryString = [
         'vehicleMake' => ['except' => ''],
-        'vehicleModel' => ['except' => ''],
-        'vehicleYear' => ['except' => 0],
         'categoryId' => ['except' => 0],
         'productId' => ['except' => 0],
         'vehicleId' => ['except' => 0],
@@ -41,7 +36,6 @@ class HomePartFinder extends Component
     protected function casts(): array
     {
         return [
-            'vehicleYear' => 'integer',
             'categoryId' => 'integer',
             'productId' => 'integer',
             'vehicleId' => 'integer',
@@ -50,21 +44,32 @@ class HomePartFinder extends Component
 
     public function mount(): void
     {
+        $legacyModel = trim((string) request()->query('vehicleModel', ''));
+        $legacyYear = trim((string) request()->query('vehicleYear', ''));
+
         if ($this->vehicleId > 0) {
-            $vehicle = Vehicle::query()->find($this->vehicleId);
-            if ($vehicle) {
-                $this->vehicleMake = (string) $vehicle->make;
-                $this->vehicleModel = (string) $vehicle->model;
-                if ($vehicle->year_from !== null && $vehicle->year_to !== null) {
-                    $this->vehicleYear = (int) floor(($vehicle->year_from + $vehicle->year_to) / 2);
-                } elseif ($vehicle->year_from !== null) {
-                    $this->vehicleYear = (int) $vehicle->year_from;
-                } elseif ($vehicle->year_to !== null) {
-                    $this->vehicleYear = (int) $vehicle->year_to;
-                }
-            } else {
+            $vehicle = Vehicle::query()
+                ->whereKey($this->vehicleId)
+                ->whereHas('products', fn (Builder $q) => $q->active())
+                ->first();
+            if ($vehicle === null) {
                 $this->vehicleId = 0;
+            } else {
+                if (trim($this->vehicleMake) === '') {
+                    $this->vehicleMake = (string) $vehicle->make;
+                } elseif (mb_strtolower(trim($this->vehicleMake)) !== mb_strtolower(trim((string) $vehicle->make))) {
+                    // Марка в URL не совпадает с записью ТС — иначе селекты и категории «уезжают».
+                    $this->vehicleMake = (string) $vehicle->make;
+                }
             }
+        }
+
+        if ($this->vehicleId <= 0 && trim($this->vehicleMake) !== '' && $legacyModel !== '') {
+            $this->vehicleId = $this->resolveVehicleIdFromLegacyQuery(
+                trim($this->vehicleMake),
+                $legacyModel,
+                $legacyYear
+            );
         }
 
         $this->syncSelections();
@@ -80,115 +85,87 @@ class HomePartFinder extends Component
             ->pluck('make');
     }
 
-    public function getVehicleModelsProperty(): Collection
+    /**
+     * Записи справочника ТС с активными товарами для выбранной марки (одна строка = одна модификация).
+     *
+     * @return Collection<int, Vehicle>
+     */
+    public function getVehicleVariantsProperty(): Collection
     {
-        if ($this->vehicleMake === '') {
+        if (trim($this->vehicleMake) === '') {
             return collect();
         }
 
-        $make = trim($this->vehicleMake);
-        $makeLower = mb_strtolower($make);
+        $makeLower = mb_strtolower(trim($this->vehicleMake));
 
-        $fromDb = Vehicle::query()
+        $ids = StorefrontVehicleProductNameConsistency::vehicleIdsWithStorefrontVisibleProductsForMake($this->vehicleMake);
+        if ($ids->isEmpty()) {
+            return collect();
+        }
+
+        return Vehicle::query()
+            ->whereIn('id', $ids)
             ->whereRaw('LOWER(make) = ?', [$makeLower])
-            ->whereHas('products', fn (Builder $q) => $q->active())
-            ->select('model')
-            ->distinct()
-            ->pluck('model')
-            ->map(fn ($m) => trim((string) $m))
-            ->filter(fn (string $m) => $m !== '' && ! ProductNameVehicleExtractor::isPlaceholderVehicleModel($m))
-            ->unique()
-            ->values();
-
-        $fromNames = Product::query()
-            ->active()
-            ->whereHas('vehicles', function (Builder $vq) use ($makeLower) {
-                $vq->whereRaw('LOWER(vehicles.make) = ?', [$makeLower]);
-                ProductNameVehicleExtractor::wherePlaceholderVehicleModel($vq, 'vehicles.model');
-            })
-            ->pluck('name')
-            ->map(fn (string $n) => ProductNameVehicleExtractor::tailAfterMake($n, $make))
-            ->filter()
-            ->unique()
-            ->values();
-
-        return $fromDb->merge($fromNames)->unique()->sort()->values();
+            ->orderByRaw('LOWER(TRIM(model))')
+            ->orderByRaw('LOWER(TRIM(COALESCE(generation, "")))')
+            ->orderBy('year_from')
+            ->orderBy('year_to')
+            ->orderBy('id')
+            ->get();
     }
 
-    public function getVehicleYearsProperty(): Collection
+    /**
+     * Активные товары по выбранному авто с фильтром «марка в названии не противоречит подбору».
+     *
+     * @return Collection<int, int>
+     */
+    public function getEligibleProductIdsForHomeFinderProperty(): Collection
     {
-        if ($this->vehicleMake === '' || $this->vehicleModel === '') {
-            return collect();
-        }
-
-        $years = Vehicle::query()
-            ->whereRaw('LOWER(make) = ?', [mb_strtolower(trim($this->vehicleMake))])
-            ->whereHas('products', fn (Builder $q) => $q->active())
-            ->get(['year_from', 'year_to'])
-            ->flatMap(function (Vehicle $vehicle) {
-                if ($vehicle->year_from === null && $vehicle->year_to === null) {
-                    return [];
-                }
-
-                $from = $vehicle->year_from ?? $vehicle->year_to;
-                $to = $vehicle->year_to ?? $vehicle->year_from;
-
-                if ($from > $to) {
-                    [$from, $to] = [$to, $from];
-                }
-
-                return range($from, $to);
-            })
-            ->unique()
-            ->sortDesc()
-            ->values();
-
-        if ($years->isEmpty() && (bool) config('storefront.vehicle_year_fallback_when_empty', true)) {
-            $from = max(1900, (int) config('storefront.vehicle_year_fallback_from', 1990));
-            $toOpt = config('storefront.vehicle_year_fallback_to');
-            $to = $toOpt !== null
-                ? max($from, (int) $toOpt)
-                : (int) now()->format('Y');
-            if ($from > $to) {
-                [$from, $to] = [$to, $from];
-            }
-
-            return collect(range($from, $to))->sortDesc()->values();
-        }
-
-        return $years;
+        return StorefrontVehicleProductNameConsistency::eligibleActiveProductIdsForVehicle(
+            $this->vehicleId,
+            $this->vehicleMake,
+            0
+        );
     }
 
     public function getSelectedVehicleLabelProperty(): ?string
     {
-        if ($this->vehicleMake === '') {
+        if (trim($this->vehicleMake) === '') {
             return null;
         }
 
-        $parts = [$this->vehicleMake];
+        if ($this->vehicleId > 0) {
+            $vehicle = Vehicle::query()->find($this->vehicleId);
+            if ($vehicle !== null) {
+                $line = trim($this->vehicleMake.' '.$vehicle->homePartFinderOptionLabel());
 
-        if ($this->vehicleModel !== '') {
-            $parts[] = $this->vehicleModel;
+                return $line !== '' ? $line : $this->vehicleMake;
+            }
         }
 
-        if ($this->vehicleYear > 0) {
-            $parts[] = (string) $this->vehicleYear;
-        }
-
-        return implode(' ', $parts);
+        return $this->vehicleMake;
     }
 
     public function getCategoriesForVehicleProperty(): Collection
     {
-        if ($this->vehicleMake === '' || $this->vehicleModel === '' || $this->vehicleYear <= 0) {
+        if (trim($this->vehicleMake) === '' || $this->vehicleId <= 0) {
             return collect();
         }
 
         $like = $this->hiddenCategorySlugLike();
 
-        $q = Product::query()->active();
-        StorefrontVehicleFilter::constrainProductsByVehicle($q, $this->vehicleMake, $this->vehicleModel, $this->vehicleYear);
-        $ids = $q->clone()->distinct()->pluck('category_id')->filter()->values();
+        $eligible = $this->eligibleProductIdsForHomeFinder;
+        if ($eligible->isEmpty()) {
+            return collect();
+        }
+
+        $ids = Product::query()
+            ->active()
+            ->whereIn('id', $eligible)
+            ->distinct()
+            ->pluck('category_id')
+            ->filter()
+            ->values();
 
         if ($ids->isEmpty()) {
             return collect();
@@ -204,17 +181,20 @@ class HomePartFinder extends Component
 
     public function getPartsForCategoryProperty(): Collection
     {
-        if ($this->categoryId <= 0 || $this->vehicleMake === '' || $this->vehicleModel === '' || $this->vehicleYear <= 0) {
+        if ($this->categoryId <= 0 || trim($this->vehicleMake) === '' || $this->vehicleId <= 0) {
             return collect();
         }
 
-        $q = Product::query()
+        $eligible = $this->eligibleProductIdsForHomeFinder;
+        if ($eligible->isEmpty()) {
+            return collect();
+        }
+
+        return Product::query()
             ->active()
-            ->where('category_id', $this->categoryId);
-
-        StorefrontVehicleFilter::constrainProductsByVehicle($q, $this->vehicleMake, $this->vehicleModel, $this->vehicleYear);
-
-        return $q->with(['category', 'brand', 'images', 'stocks', 'crossNumbers', 'vehicles'])
+            ->whereIn('id', $eligible)
+            ->where('category_id', $this->categoryId)
+            ->with(['category', 'brand', 'images', 'stocks', 'crossNumbers', 'vehicles'])
             ->orderBy('name')
             ->get();
     }
@@ -225,12 +205,16 @@ class HomePartFinder extends Component
             return null;
         }
 
+        $eligible = $this->eligibleProductIdsForHomeFinder;
+        if ($eligible->isEmpty() || ! $eligible->contains($this->productId)) {
+            return null;
+        }
+
         $q = Product::query()
             ->active()
             ->whereKey($this->productId)
-            ->where('category_id', $this->categoryId);
-
-        StorefrontVehicleFilter::constrainProductsByVehicle($q, $this->vehicleMake, $this->vehicleModel, $this->vehicleYear);
+            ->where('category_id', $this->categoryId)
+            ->whereIn('id', $eligible);
 
         return $q->with([
             'category',
@@ -245,7 +229,7 @@ class HomePartFinder extends Component
     /**
      * Аналоги, по которым в каталоге есть отдельный товар (покупателю не показываем «мертвые» кроссы).
      *
-     * @return \Illuminate\Support\Collection<int, object{cross: \App\Models\ProductCrossNumber, linked: \App\Models\Product}>
+     * @return Collection<int, object{cross: ProductCrossNumber, linked: Product}>
      */
     public function getCrossAnalogRowsProperty(): Collection
     {
@@ -254,7 +238,13 @@ class HomePartFinder extends Component
             return collect();
         }
 
-        return $product->crossNumbersWithLinkedProducts()->map(function (object $item) {
+        return $product->crossNumbersWithLinkedProducts(
+            forVehicleId: $this->vehicleId > 0 ? $this->vehicleId : null,
+            forVehicleMake: trim($this->vehicleMake) !== '' ? $this->vehicleMake : null,
+            forVehicleModel: null,
+            forVehicleYearFrom: null,
+            forVehicleYearTo: null,
+        )->map(function (object $item) {
             $item->linked->loadMissing(['category', 'brand', 'images', 'stocks', 'crossNumbers', 'vehicles']);
 
             return $item;
@@ -264,25 +254,13 @@ class HomePartFinder extends Component
     public function updatedVehicleMake(): void
     {
         $this->vehicleId = 0;
-        $this->vehicleModel = '';
-        $this->vehicleYear = 0;
         $this->categoryId = 0;
         $this->productId = 0;
         $this->syncSelections();
     }
 
-    public function updatedVehicleModel(): void
+    public function updatedVehicleId(): void
     {
-        $this->vehicleId = 0;
-        $this->vehicleYear = 0;
-        $this->categoryId = 0;
-        $this->productId = 0;
-        $this->syncSelections();
-    }
-
-    public function updatedVehicleYear(): void
-    {
-        $this->vehicleId = 0;
         $this->categoryId = 0;
         $this->productId = 0;
         $this->syncSelections();
@@ -302,11 +280,26 @@ class HomePartFinder extends Component
     public function clearSelection(): void
     {
         $this->vehicleMake = '';
-        $this->vehicleModel = '';
-        $this->vehicleYear = 0;
         $this->categoryId = 0;
         $this->productId = 0;
         $this->vehicleId = 0;
+    }
+
+    /**
+     * Параметры для ссылок на карточку товара (фильтр аналогов по выбранной модификации).
+     *
+     * @return array<string, int|string>
+     */
+    public function getProductUrlVehicleQueryProperty(): array
+    {
+        if ($this->vehicleId <= 0 || trim($this->vehicleMake) === '') {
+            return [];
+        }
+
+        return array_filter([
+            'vehicleId' => $this->vehicleId,
+            'vehicleMake' => trim($this->vehicleMake),
+        ], static fn ($v) => $v !== null && $v !== '');
     }
 
     /**
@@ -356,15 +349,9 @@ class HomePartFinder extends Component
             return;
         }
 
-        if ($this->vehicleModel !== '' && ! $this->vehicleModels->contains($this->vehicleModel)) {
-            $this->vehicleModel = '';
-            $this->vehicleYear = 0;
-            $this->categoryId = 0;
-            $this->productId = 0;
-        }
-
-        if ($this->vehicleYear > 0 && ! $this->vehicleYears->contains($this->vehicleYear)) {
-            $this->vehicleYear = 0;
+        $variantIds = $this->vehicleVariants->pluck('id');
+        if ($this->vehicleId > 0 && ! $variantIds->contains($this->vehicleId)) {
+            $this->vehicleId = 0;
             $this->categoryId = 0;
             $this->productId = 0;
         }
@@ -382,5 +369,43 @@ class HomePartFinder extends Component
     public function render()
     {
         return view('livewire.storefront.home-part-finder');
+    }
+
+    /**
+     * Старые ссылки ?vehicleMake=&vehicleModel=&vehicleYear= → vehicleId.
+     */
+    protected function resolveVehicleIdFromLegacyQuery(string $make, string $model, string $yearSelection): int
+    {
+        $q = Vehicle::query()
+            ->whereHas('products', fn (Builder $pq) => $pq->active())
+            ->where(function (Builder $vq) use ($make, $model): void {
+                StorefrontVehicleFilter::constrainVehicleTableRowsByMakeAndModel($vq, $make, $model);
+            });
+
+        $candidates = $q->orderBy('id')->get();
+        if ($candidates->isEmpty()) {
+            return 0;
+        }
+
+        $bounds = StorefrontVehicleFilter::parseYearSelectionBounds($yearSelection);
+        if ($bounds !== null) {
+            $filtered = $candidates->filter(function (Vehicle $v) use ($bounds): bool {
+                [$vf, $vt] = $v->logicalYearBoundsInclusive();
+
+                return $bounds['to'] >= $vf && $bounds['from'] <= $vt;
+            })->values();
+
+            if ($filtered->isEmpty()) {
+                return 0;
+            }
+
+            return (int) $filtered->first()->id;
+        }
+
+        if ($candidates->count() === 1) {
+            return (int) $candidates->first()->id;
+        }
+
+        return 0;
     }
 }

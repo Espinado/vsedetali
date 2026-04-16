@@ -51,6 +51,11 @@ return [
         /** Тип ТС: из GET /types/list-vehicles-type (часто 1 — легковые). Используется в т.ч. в selecting-a-list-of-cars-for-oem-part-number */
         'vehicle_type_id' => (int) env('RAPIDAPI_AUTO_PARTS_VEHICLE_TYPE_ID', 1),
         'timeout' => (int) env('RAPIDAPI_AUTO_PARTS_TIMEOUT', 30),
+        /**
+         * Доп. GET-пути к карточке артикула (через «|»), плейсхолдеры {articleId} и {langId}.
+         * См. плейграунд RapidAPI — если «богатый» JSON с articleInfo/compatibleCars на другом маршруте.
+         */
+        'article_detail_paths_extra' => env('RAPIDAPI_AUTO_PARTS_ARTICLE_DETAIL_PATHS_EXTRA', ''),
     ],
 
 ];

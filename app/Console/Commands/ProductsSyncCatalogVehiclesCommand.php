@@ -4,6 +4,7 @@ namespace App\Console\Commands;
 
 use App\Models\Product;
 use App\Services\AutoPartsCatalogService;
+use App\Services\CatalogProductImageDownloader;
 use App\Services\CatalogProductMetadataSyncService;
 use App\Services\CatalogVehicleSyncService;
 use Illuminate\Console\Command;
@@ -17,14 +18,16 @@ class ProductsSyncCatalogVehiclesCommand extends Command
     protected $signature = 'products:sync-catalog-vehicles
         {--limit=0 : Обработать не больше N товаров (0 = все)}
         {--sleep=120 : Пауза между запросами к API, мс}
-        {--only-without-catalog-match : Только товары, по которым каталог ещё не дал ответ (нет атрибута «Источник каталога»)}';
+        {--only-without-catalog-match : Только товары, по которым каталог ещё не дал ответ (нет атрибута «Источник каталога»)}
+        {--with-images : Дополнительно догружать фото по SKU, если у товара нет рабочих изображений}';
 
-    protected $description = 'По SKU вызывает каталог RapidAPI и добавляет применимость (Vehicle) к товарам';
+    protected $description = 'Массово переобогащает товары из RapidAPI: авто-совместимость, метаданные, витринная категория и фото';
 
     public function handle(
         AutoPartsCatalogService $catalog,
         CatalogVehicleSyncService $vehicleSync,
-        CatalogProductMetadataSyncService $metadataSync
+        CatalogProductMetadataSyncService $metadataSync,
+        CatalogProductImageDownloader $imageDownloader
     ): int {
         if (! $catalog->isConfigured()) {
             $this->error('Задайте RAPIDAPI_AUTO_PARTS_KEY в .env');
@@ -35,6 +38,7 @@ class ProductsSyncCatalogVehiclesCommand extends Command
         $limit = max(0, (int) $this->option('limit'));
         $sleepMs = max(0, (int) $this->option('sleep'));
         $onlyWithoutMatch = (bool) $this->option('only-without-catalog-match');
+        $withImages = (bool) $this->option('with-images');
 
         $query = Product::query()->active()->orderBy('id');
         if ($onlyWithoutMatch) {
@@ -49,6 +53,8 @@ class ProductsSyncCatalogVehiclesCommand extends Command
         $attrs = 0;
         $primaryOem = 0;
         $storefrontCat = 0;
+        $imagesAttached = 0;
+        $imagesFailed = 0;
         $errors = 0;
 
         $this->info('Синхронизация применимости и метаданных из каталога (RapidAPI)...');
@@ -69,7 +75,15 @@ class ProductsSyncCatalogVehiclesCommand extends Command
                 if ($metadataSync->ensurePrimaryOemFromSku($product)) {
                     $primaryOem++;
                 }
-                $enriched = $catalog->lookupEnrichedForStockWithCandidates((string) $product->sku, $codeAlt);
+                $enriched = $catalog->lookupEnrichedForStockWithCandidates((string) $product->sku, $codeAlt, (string) $product->name);
+                if (($enriched['source'] ?? 'none') === 'none') {
+                    $processed++;
+                    if ($sleepMs > 0) {
+                        usleep($sleepMs * 1000);
+                    }
+
+                    continue;
+                }
                 $attachedTotal += $vehicleSync->attachFromEnrichment($product, $enriched);
                 $fresh = $product->fresh();
                 $meta = $metadataSync->syncFromEnrichment($fresh, $enriched);
@@ -78,6 +92,19 @@ class ProductsSyncCatalogVehiclesCommand extends Command
                 $attrs += $meta['attributes_upserted'];
                 if ($metadataSync->assignStorefrontCategoryFromEnrichment($fresh, $enriched)) {
                     $storefrontCat++;
+                }
+                if ($withImages && ! $imageDownloader->productHasUsableImages($fresh)) {
+                    $imgResult = $imageDownloader->attachFromSkuRawIfConfigured(
+                        $fresh,
+                        (string) $product->sku,
+                        $codeAlt,
+                        true
+                    );
+                    match ($imgResult) {
+                        'attached' => $imagesAttached++,
+                        'download_failed', 'api_error' => $imagesFailed++,
+                        default => null,
+                    };
                 }
             } catch (\Throwable $e) {
                 $errors++;
@@ -100,6 +127,8 @@ class ProductsSyncCatalogVehiclesCommand extends Command
                 ['Кросс-номера', $cross],
                 ['Атрибуты каталога (категория/источник)', $attrs],
                 ['Категория витрины (products.category_id)', $storefrontCat],
+                ['Фото догружено', $imagesAttached],
+                ['Ошибок догрузки фото', $imagesFailed],
                 ['Ошибок API', $errors],
             ]
         );

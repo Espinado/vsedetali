@@ -10,6 +10,7 @@ use App\Http\Middleware\RedirectIfSellerBlockedFromPanel;
 use Filament\Http\Middleware\Authenticate;
 use Filament\Http\Middleware\DisableBladeIconComponents;
 use Filament\Http\Middleware\DispatchServingFilamentEvent;
+use Filament\Navigation\NavigationGroup;
 use Filament\Panel;
 use Filament\PanelProvider;
 use Filament\Support\Colors\Color;
@@ -39,8 +40,18 @@ class SellerPanelProvider extends PanelProvider
                 'primary' => Color::Orange,
             ])
             ->discoverResources(in: app_path('Filament/Seller/Resources'), for: 'App\\Filament\\Seller\\Resources')
+            ->discoverPages(in: app_path('Filament/Seller/Pages'), for: 'App\\Filament\\Seller\\Pages')
             ->pages([
                 Dashboard::class,
+            ])
+            ->collapsibleNavigationGroups(true)
+            ->navigationGroups([
+                NavigationGroup::make()
+                    ->label('Главная')
+                    ->collapsed(true),
+                NavigationGroup::make()
+                    ->label('Финансы')
+                    ->collapsed(true),
             ])
             ->widgets([
                 SellerOrdersSummaryWidget::class,
@@ -77,6 +88,7 @@ class SellerPanelProvider extends PanelProvider
             ->renderHook(
                 PanelsRenderHook::HEAD_END,
                 fn (): string => view('partials.pwa-head')->render()
+                    .view('filament.hooks.sidebar-navigation-storage-sync')->render()
             )
             ->renderHook(
                 'panels::styles.after',

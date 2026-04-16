@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Models\Brand;
 use App\Models\Category;
 use App\Models\Product;
+use App\Models\ProductOemNumber;
 use App\Support\ProductCatalogSlug;
 use App\Models\Stock;
 use App\Models\Vehicle;
@@ -222,6 +223,15 @@ class GeelyVesnaSpringExcelImportService
                 $product->save();
 
                 $oemForPivot = Str::limit(explode('/', $article)[0], 100, '');
+                if ($oemForPivot !== '') {
+                    ProductOemNumber::query()->firstOrCreate(
+                        [
+                            'product_id' => $product->id,
+                            'oem_number' => $oemForPivot,
+                        ],
+                        []
+                    );
+                }
 
                 if (! $product->vehicles()->where('vehicles.id', $vehicle->id)->exists()) {
                     $product->vehicles()->attach($vehicle->id, ['oem_number' => $oemForPivot ?: null]);

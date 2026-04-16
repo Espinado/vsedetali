@@ -1,20 +1,27 @@
 <?php
 
+use App\Http\Controllers\Account\AddressController;
+use App\Http\Controllers\Account\ProfileController;
 use App\Http\Controllers\AuthController;
+use App\Http\Controllers\CatalogOemLookupController;
 use App\Http\Controllers\FilamentSessionLoginController;
-use App\Http\Middleware\RedirectPanelSubdomainsFromStorefront;
+use App\Http\Controllers\ProductController;
 use App\Http\Controllers\PwaManifestController;
 use App\Http\Controllers\PwaServiceWorkerController;
 use App\Http\Controllers\SellerStaffInviteController;
-use App\Http\Controllers\StaffInviteController;
-use App\Http\Controllers\ProductController;
 use App\Http\Controllers\SitemapController;
+use App\Http\Controllers\StaffInviteController;
+use App\Http\Middleware\RedirectPanelSubdomainsFromStorefront;
+use App\Livewire\Storefront\CartPage;
+use App\Livewire\Storefront\CheckoutWizard;
+use App\Livewire\Storefront\ProductGrid;
 use App\Models\Banner;
 use App\Models\Order;
 use App\Models\Page;
 use App\Models\Product;
 use App\Models\Setting;
 use App\Models\Vehicle;
+use App\Services\CartService;
 use App\Support\Seo;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Route;
@@ -142,20 +149,20 @@ $registerStorefrontRoutes = function () use ($panelsUseDedicatedHosts): void {
         ]);
     })->name('home');
 
-    Route::get('/vehicle/{vehicle}', \App\Livewire\Storefront\ProductGrid::class)
+    Route::get('/vehicle/{vehicle}', ProductGrid::class)
         ->name('vehicle.parts');
 
     /** Подбор по марке/модели/году и id ТС (query); канонический URL — vehicle.parts */
-    Route::get('/parts/by-car', \App\Livewire\Storefront\ProductGrid::class)
+    Route::get('/parts/by-car', ProductGrid::class)
         ->name('vehicle.by_car');
 
     Route::get('/catalog/{categorySlug?}', function () {
         return redirect()->route('home', request()->query(), 301);
     })->name('catalog');
     Route::get('/product/{product:slug}', [ProductController::class, 'show'])->name('product.show');
-    Route::get('/cart', \App\Livewire\Storefront\CartPage::class)->name('cart');
+    Route::get('/cart', CartPage::class)->name('cart');
     Route::middleware(['auth', 'customer.not.blocked'])->group(function () {
-        Route::get('/checkout', \App\Livewire\Storefront\CheckoutWizard::class)->name('checkout');
+        Route::get('/checkout', CheckoutWizard::class)->name('checkout');
         Route::get('/checkout/payment/{order}', function (Order $order) {
             abort_if($order->user_id !== auth()->id(), 403);
 
@@ -193,20 +200,20 @@ $registerStorefrontRoutes = function () use ($panelsUseDedicatedHosts): void {
 
             return view('account.orders', ['orders' => $orders]);
         })->name('orders.index');
-        Route::get('/orders/{order}', function (App\Models\Order $order) {
+        Route::get('/orders/{order}', function (Order $order) {
             abort_if($order->user_id !== auth()->id(), 403);
 
             return view('account.order-show', ['order' => $order->load(['orderItems', 'orderAddresses', 'status', 'shippingMethod', 'paymentMethod', 'latestPayment', 'latestShipment.shippingMethod'])]);
         })->name('orders.show');
-        Route::get('/profile', [\App\Http\Controllers\Account\ProfileController::class, 'edit'])->name('profile.edit');
-        Route::put('/profile', [\App\Http\Controllers\Account\ProfileController::class, 'update'])->name('profile.update');
-        Route::resource('addresses', \App\Http\Controllers\Account\AddressController::class)->except(['show']);
+        Route::get('/profile', [ProfileController::class, 'edit'])->name('profile.edit');
+        Route::put('/profile', [ProfileController::class, 'update'])->name('profile.update');
+        Route::resource('addresses', AddressController::class)->except(['show']);
     });
 
     if (app()->environment('testing')) {
         // Только phpunit: тот же домен/сессия, что и у витрины (см. StorefrontFlowTest — merge при логине).
         Route::get('/_testing/guest-cart-seed/{product}', function (Product $product) {
-            app(\App\Services\CartService::class)->addItem($product, 2);
+            app(CartService::class)->addItem($product, 2);
 
             return response('ok', 200);
         })->name('testing.guest-cart-seed');
@@ -224,3 +231,6 @@ if ($panelsUseDedicatedHosts && $storefrontHost !== '') {
 
 Route::get('/manifest.webmanifest', PwaManifestController::class)->name('pwa.manifest');
 Route::get('/sw.js', PwaServiceWorkerController::class)->name('pwa.sw');
+Route::post('/api/catalog/oem/resolve', CatalogOemLookupController::class)
+    ->middleware('throttle:30,1')
+    ->name('api.catalog.oem.resolve');

@@ -4,10 +4,12 @@ namespace App\Services;
 
 use App\Models\Category;
 use App\Models\Product;
-use App\Support\CategoryCatalogSlug;
 use App\Models\ProductAttribute;
 use App\Models\ProductCrossNumber;
 use App\Models\ProductOemNumber;
+use App\Support\CatalogStorefrontCategoryConflictDetector;
+use App\Support\CatalogStorefrontCategoryModerationLogger;
+use App\Support\CategoryCatalogSlug;
 use Illuminate\Support\Str;
 
 /**
@@ -142,6 +144,85 @@ class CatalogProductMetadataSyncService
     }
 
     /**
+     * Дополняет товар данными из полного OEM-бандла (JSONL): OEM номера детали и её спецификации.
+     *
+     * @param  array<string, mixed>  $bundle
+     * @return array{oem_added: int, attributes_upserted: int}
+     */
+    public function syncFromFullOemBundle(Product $product, array $bundle): array
+    {
+        $out = ['oem_added' => 0, 'attributes_upserted' => 0];
+
+        $part = $bundle['part'] ?? null;
+        if (! is_array($part)) {
+            return $out;
+        }
+
+        $oemRows = $part['oem_numbers'] ?? null;
+        if (is_array($oemRows)) {
+            foreach ($oemRows as $row) {
+                if (! is_array($row)) {
+                    continue;
+                }
+                $no = trim((string) ($row['article_no'] ?? ''));
+                if ($no === '') {
+                    continue;
+                }
+                $created = ProductOemNumber::query()->firstOrCreate(
+                    ['product_id' => $product->id, 'oem_number' => Str::limit($no, 100, '')],
+                    []
+                );
+                if ($created->wasRecentlyCreated) {
+                    $out['oem_added']++;
+                }
+            }
+        }
+
+        $specRows = $part['specifications'] ?? null;
+        if (! is_array($specRows) || $specRows === []) {
+            return $out;
+        }
+
+        $byName = [];
+        foreach ($specRows as $row) {
+            if (! is_array($row)) {
+                continue;
+            }
+            $name = trim((string) ($row['criteria_name'] ?? ''));
+            $value = trim((string) ($row['criteria_value'] ?? ''));
+            if ($name === '' || $value === '') {
+                continue;
+            }
+            $key = mb_strtolower($name);
+            if (! isset($byName[$key])) {
+                $byName[$key] = ['name' => Str::limit($name, 255, ''), 'values' => []];
+            }
+            if (! in_array($value, $byName[$key]['values'], true)) {
+                $byName[$key]['values'][] = $value;
+            }
+        }
+
+        $sort = 20;
+        foreach ($byName as $row) {
+            $name = 'Характеристика: '.$row['name'];
+            $value = Str::limit(implode(' | ', $row['values']), 500, '');
+            ProductAttribute::query()->updateOrCreate(
+                [
+                    'product_id' => $product->id,
+                    'name' => Str::limit($name, 255, ''),
+                ],
+                [
+                    'value' => $value,
+                    'sort' => $sort++,
+                ]
+            );
+            $out['attributes_upserted']++;
+        }
+
+        return $out;
+    }
+
+    /**
      * Привязка товара к дереву {@see Category} по полям category_main / category_sub из TecDoc (для витрины /catalog).
      */
     public function assignStorefrontCategoryFromEnrichment(Product $product, array $enriched): bool
@@ -154,6 +235,23 @@ class CatalogProductMetadataSyncService
         if ($main === '') {
             $main = $sub;
             $sub = '';
+        }
+
+        $pathLabel = $sub !== '' ? $main.' / '.$sub : $main;
+        $conflict = CatalogStorefrontCategoryConflictDetector::detect((string) $product->name, $main, $sub);
+        if ($conflict !== null) {
+            CatalogStorefrontCategoryModerationLogger::log(
+                $conflict,
+                (int) $product->id,
+                (string) $product->sku,
+                (string) $product->name,
+                $main,
+                $sub,
+                $pathLabel,
+                'skipped_assignment',
+            );
+
+            return false;
         }
 
         $parent = $this->firstOrCreateCategoryByNameUnderParent($main, null);

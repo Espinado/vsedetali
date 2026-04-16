@@ -55,6 +55,9 @@ class AdminPanelProvider extends PanelProvider
                     ->label('Продажи')
                     ->collapsed(true),
                 NavigationGroup::make()
+                    ->label('Финансы')
+                    ->collapsed(true),
+                NavigationGroup::make()
                     ->label('Склад')
                     ->collapsed(true),
                 NavigationGroup::make()

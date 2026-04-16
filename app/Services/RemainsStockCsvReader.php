@@ -2,6 +2,8 @@
 
 namespace App\Services;
 
+use App\Console\Commands\RemainsCsvInspectCommand;
+
 /**
  * Чтение CSV отчёта «Остатки» (Код, Артикул, …) — та же нормализация, что в {@see RemainsStockCsvImportService}.
  */
@@ -35,7 +37,7 @@ final class RemainsStockCsvReader
     }
 
     /**
-     * Первые N физических строк файла в UTF-8 (для {@see \App\Console\Commands\RemainsCsvInspectCommand}).
+     * Первые N физических строк файла в UTF-8 (для {@see RemainsCsvInspectCommand}).
      *
      * @return list<string>
      */
@@ -81,6 +83,12 @@ final class RemainsStockCsvReader
         return array_slice(array_map(static fn ($l) => (string) $l, $lines), 0, max(1, $maxLines));
     }
 
+    /** Строка-секция: пустой артикул и наименование, непустой «Код» с меткой секции. */
+    public static function isSectionHeaderRow(string $skuRaw, string $name, string $code): bool
+    {
+        return $skuRaw === '' && $name === '' && trim($code) !== '';
+    }
+
     /**
      * Строки данных после заголовка (включая строки-секции: пустой артикул).
      *
@@ -93,7 +101,7 @@ final class RemainsStockCsvReader
             throw new \InvalidArgumentException("Файл недоступен: {$absolutePath}");
         }
 
-        [$handle, $delimiter, , $afterHeaderBytePos, ] = self::openNormalizedCsvStream($absolutePath, $csvEncoding);
+        [$handle, $delimiter, , $afterHeaderBytePos] = self::openNormalizedCsvStream($absolutePath, $csvEncoding);
 
         try {
             rewind($handle);

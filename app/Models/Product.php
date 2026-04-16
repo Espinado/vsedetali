@@ -3,12 +3,15 @@
 namespace App\Models;
 
 use App\Support\ProductNameVehicleExtractor;
+use App\Support\StorefrontVehicleFilter;
 use App\Support\VehicleLabelNormalizer;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Support\Collection;
 
 class Product extends Model
 {
@@ -132,28 +135,106 @@ class Product extends Model
     /**
      * Кросс-номера, по которым в каталоге есть другой товар (совпадение SKU). Без карточки — не попадают в выдачу.
      *
-     * Если у этого товара задана совместимость с авто, в список попадают только товары с пересечением по ТС.
-     * Так отсекаются ложные совпадения по номеру (например сайлентблок и рычаг из одной цепочки OEM).
+     * Если передан контекст машины (марка/модель/год или vehicleId), аналог должен подходить именно к нему
+     * (та же логика года, что в каталоге: pivot compat_year_* и year_from/year_to).
      *
-     * @return \Illuminate\Support\Collection<int, object{cross: \App\Models\ProductCrossNumber, linked: \App\Models\Product}>
+     * Если контекста нет и у этого товара задана совместимость с авто, в список попадают только товары
+     * с пересечением по записям ТС в БД (как раньше).
+     *
+     * @return Collection<int, object{cross: ProductCrossNumber, linked: Product}>
      */
-    public function crossNumbersWithLinkedProducts(): \Illuminate\Support\Collection
-    {
+    public function crossNumbersWithLinkedProducts(
+        ?int $forVehicleId = null,
+        ?string $forVehicleMake = null,
+        ?string $forVehicleModel = null,
+        ?int $forVehicleYearFrom = null,
+        ?int $forVehicleYearTo = null,
+    ): Collection {
         $sourceVehicleIds = $this->relationLoaded('vehicles')
             ? $this->vehicles->pluck('id')->unique()->values()
             : $this->vehicles()->pluck('id')->unique()->values();
 
+        $make = trim((string) $forVehicleMake);
+        $hasVehicleContext = ($forVehicleId !== null && $forVehicleId > 0) || $make !== '';
+
         return $this->crossNumbers
-            ->map(function (ProductCrossNumber $cn) use ($sourceVehicleIds) {
+            ->map(function (ProductCrossNumber $cn) use (
+                $sourceVehicleIds,
+                $hasVehicleContext,
+                $forVehicleId,
+                $make,
+                $forVehicleModel,
+                $forVehicleYearFrom,
+                $forVehicleYearTo,
+            ) {
                 $linked = static::query()
                     ->where('is_active', true)
                     ->where('id', '!=', $this->id)
                     ->whereSkuMatchesPartNumber($cn->cross_number)
                     ->when(
-                        $sourceVehicleIds->isNotEmpty(),
-                        fn ($q) => $q->whereHas(
+                        $hasVehicleContext,
+                        function (Builder $q) use (
+                            $forVehicleId,
+                            $make,
+                            $forVehicleModel,
+                            $forVehicleYearFrom,
+                            $forVehicleYearTo,
+                        ): void {
+                            if ($forVehicleId !== null && $forVehicleId > 0) {
+                                $q->whereHas('vehicles', function (Builder $vq) use (
+                                    $forVehicleId,
+                                    $forVehicleYearFrom,
+                                    $forVehicleYearTo,
+                                ): void {
+                                    $vq->where('vehicles.id', $forVehicleId);
+                                    if ($forVehicleYearFrom !== null && $forVehicleYearTo !== null) {
+                                        $from = min($forVehicleYearFrom, $forVehicleYearTo);
+                                        $to = max($forVehicleYearFrom, $forVehicleYearTo);
+                                        $years = range($from, $to);
+                                        $vq->where(function (Builder $yw) use ($years): void {
+                                            foreach ($years as $index => $year) {
+                                                if ($index === 0) {
+                                                    StorefrontVehicleFilter::applyVehicleYearConstraintForProductVehicleLink($yw, $year);
+                                                } else {
+                                                    $yw->orWhere(function (Builder $inner) use ($year): void {
+                                                        StorefrontVehicleFilter::applyVehicleYearConstraintForProductVehicleLink($inner, $year);
+                                                    });
+                                                }
+                                            }
+                                        });
+                                    }
+                                });
+
+                                return;
+                            }
+
+                            if ($forVehicleYearFrom !== null && $forVehicleYearTo !== null) {
+                                StorefrontVehicleFilter::constrainProductsByVehicleYearWindow(
+                                    $q,
+                                    $make,
+                                    (string) $forVehicleModel,
+                                    $forVehicleYearFrom,
+                                    $forVehicleYearTo,
+                                );
+
+                                return;
+                            }
+
+                            $singleYear = $forVehicleYearFrom ?? $forVehicleYearTo ?? 0;
+
+                            StorefrontVehicleFilter::constrainProductsByVehicle(
+                                $q,
+                                $make,
+                                (string) $forVehicleModel,
+                                $singleYear,
+                            );
+                        }
+                    )
+                    ->when(
+                        ! $hasVehicleContext && $sourceVehicleIds->isNotEmpty(),
+                        fn (Builder $q) => $q->whereHas(
                             'vehicles',
-                            fn ($q2) => $q2->whereKey($sourceVehicleIds)
+                            fn (Builder $q2) => $q2->whereKey($sourceVehicleIds)
                         )
                     )
                     ->with([
@@ -206,11 +287,8 @@ class Product extends Model
                 }
                 $out[] = VehicleLabelNormalizer::title(trim($make.' '.$tail)).$this->storefrontYearSuffixForLinkedVehicle($v);
             } else {
-                $base = trim($make.' '.$model);
-                if ($v->generation !== null && trim((string) $v->generation) !== '') {
-                    $base = trim($base.' '.trim((string) $v->generation));
-                }
-                $out[] = $base.$this->storefrontYearSuffixForLinkedVehicle($v);
+                $modelForCard = Vehicle::finderModelLabelWithoutTecdocCodeSuffix($model);
+                $out[] = trim($make.' '.$modelForCard).$this->storefrontYearSuffixForLinkedVehicle($v);
             }
         }
 
@@ -251,10 +329,7 @@ class Product extends Model
                 }
             }
         } else {
-            $name = trim($make.' '.$model);
-            if ($vehicle->generation !== null && trim((string) $vehicle->generation) !== '') {
-                $name = trim($name.' '.trim((string) $vehicle->generation));
-            }
+            $name = trim($make.' '.Vehicle::finderModelLabelWithoutTecdocCodeSuffix($model));
         }
 
         $name .= $this->storefrontYearSuffixForLinkedVehicle($vehicle);

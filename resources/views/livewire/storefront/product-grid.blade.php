@@ -48,6 +48,7 @@
     {{-- Сайдбар: на мобильных под списком товаров (order), на lg — слева --}}
     <aside class="order-2 shrink-0 lg:order-1 lg:w-64">
         <div class="space-y-4 rounded-xl border border-orange-100/90 bg-white/90 p-3 shadow-sm shadow-orange-950/5 backdrop-blur-sm lg:sticky lg:top-24">
+            @if(! $vehiclePageContext)
             <details class="sidebar-accordion rounded-lg border border-orange-100/80 bg-orange-50/40 shadow-sm">
                 <summary class="flex w-full cursor-pointer list-none items-center justify-between gap-2 rounded-lg px-3 py-3 text-left transition hover:bg-orange-50/80 [&::-webkit-details-marker]:hidden">
                     <span class="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
@@ -106,6 +107,7 @@
                     </ul>
                 </div>
             </details>
+            @endif
 
             <div>
                 <h3 class="font-semibold text-slate-800 mb-3">Подбор по авто</h3>
@@ -133,7 +135,7 @@
                             <select id="vehicle-model" wire:model.live="vehicleModel" class="w-full rounded-lg border-slate-300 shadow-sm text-sm" @disabled($vehicleMake === '')>
                                 <option value="">Все модели</option>
                                 @foreach($this->vehicleModels as $model)
-                                    <option value="{{ $model }}">{{ $model }}</option>
+                                    <option value="{{ $model }}">{{ \App\Models\Vehicle::finderModelLabelWithoutTecdocCodeSuffix($model) }}</option>
                                 @endforeach
                             </select>
                         </div>
@@ -271,7 +273,7 @@
                     <span class="inline-flex items-center rounded-full bg-orange-50 px-3 py-1 text-sm font-medium text-stone-800 ring-1 ring-orange-100/80">{{ $vehicleMake }}</span>
                 @endif
                 @if($vehicleModel !== '')
-                    <span class="inline-flex items-center rounded-full bg-orange-50 px-3 py-1 text-sm font-medium text-stone-800 ring-1 ring-orange-100/80">{{ $vehicleModel }}</span>
+                    <span class="inline-flex items-center rounded-full bg-orange-50 px-3 py-1 text-sm font-medium text-stone-800 ring-1 ring-orange-100/80">{{ \App\Models\Vehicle::finderModelLabelWithoutTecdocCodeSuffix($vehicleModel) }}</span>
                 @endif
                 @if($vehicleYear > 0)
                     <span class="inline-flex items-center rounded-full bg-orange-50 px-3 py-1 text-sm font-medium text-stone-800 ring-1 ring-orange-100/80">{{ $vehicleYear }}</span>
@@ -292,9 +294,17 @@
         @if($products->isEmpty())
             <p class="text-slate-600 py-12 text-center">По выбранным фильтрам товары не найдены.</p>
         @else
+            @php
+                $pgVehicleQuery = array_filter([
+                    'vehicleId' => $vehicleId > 0 ? $vehicleId : null,
+                    'vehicleMake' => $vehicleMake !== '' ? $vehicleMake : null,
+                    'vehicleModel' => $vehicleModel !== '' ? $vehicleModel : null,
+                    'vehicleYear' => $vehicleYear > 0 ? (string) $vehicleYear : null,
+                ], static fn ($v) => $v !== null && $v !== '');
+            @endphp
             <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
                 @foreach($products as $product)
-                    <a href="{{ route('product.show', $product) }}"
+                    <a href="{{ route('product.show', $product) }}{{ $pgVehicleQuery === [] ? '' : '?'.http_build_query($pgVehicleQuery) }}"
                        class="card-store-product group">
                         <div class="flex aspect-square items-center justify-center overflow-hidden bg-stone-100">
                             @if($product->mainImage?->storage_url)
@@ -322,7 +332,7 @@
                             @else
                                 <p class="mt-1 text-xs font-semibold text-amber-700">Под заказ</p>
                             @endif
-                            @if($this->selectedVehicleLabel)
+                            @if($this->selectedVehicleLabel && (! $vehiclePageContext || $vehicleId <= 0 || $product->vehicles->contains('id', (int) $vehicleId)))
                                 <p class="mt-1 text-xs font-medium text-orange-700">
                                     Подходит для {{ $this->selectedVehicleLabel }}
                                 </p>

@@ -2,7 +2,7 @@
 <script>
     (function () {
         try {
-            var VERSION = '2-all-groups-collapsed-default';
+            var VERSION = '3-finance-collapsed-default';
             var key = 'vsedetalki_ru_filament_collapsed_groups_storage_v';
             if (localStorage.getItem(key) !== VERSION) {
                 localStorage.removeItem('collapsedGroups');
