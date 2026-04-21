@@ -236,14 +236,32 @@ class ProductGrid extends Component
 
     public function getVehicleMakesProperty()
     {
-        return Vehicle::query()
+        $fromVehicles = Vehicle::query()
             ->whereHas('products', function (Builder $query) {
-                $this->applyProductFilters($query, ['vehicleMake', 'vehicleModel', 'vehicleYear']);
+                $this->applyProductFilters($query, ['vehicleMake', 'vehicleModel', 'vehicleYear', 'vehicleId']);
             })
             ->select('make')
             ->distinct()
             ->orderBy('make')
-            ->pluck('make');
+            ->pluck('make')
+            ->map(fn ($m) => trim((string) $m))
+            ->filter()
+            ->unique()
+            ->values();
+
+        $fromVehicles = $fromVehicles
+            ->filter(fn (string $make): bool => StorefrontVehicleProductNameConsistency::vehicleIdsWithStorefrontVisibleProductsForMake($make)->isNotEmpty())
+            ->values();
+
+        $fromNames = ProductNameVehicleExtractor::distinctMakesInferrableFromProductNamesForPlaceholderVehicles(
+            fn (Builder $q) => $this->applyProductFilters($q, ['vehicleMake', 'vehicleModel', 'vehicleYear', 'vehicleId'])
+        );
+
+        return $fromVehicles
+            ->merge($fromNames)
+            ->unique()
+            ->sort()
+            ->values();
     }
 
     public function getVehicleModelsProperty()

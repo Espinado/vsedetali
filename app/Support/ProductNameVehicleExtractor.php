@@ -2,6 +2,7 @@
 
 namespace App\Support;
 
+use App\Models\Product;
 use App\Models\Vehicle;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Collection;
@@ -16,6 +17,7 @@ final class ProductNameVehicleExtractor
     public static function clearMakesCache(): void
     {
         self::$makesCache = null;
+        StorefrontVehicleProductNameConsistency::clearMakesWithVisibleVariantsCache();
     }
 
     public static function defaultModelPlaceholderLower(): string
@@ -171,5 +173,46 @@ final class ProductNameVehicleExtractor
                 ->orWhereRaw('LOWER(TRIM('.$column.')) = ?', [$def])
                 ->orWhereRaw('LOWER(TRIM('.$column.')) = ?', ['общее']);
         });
+    }
+
+    /**
+     * Марки из таблицы vehicles, для которых в каталоге можно вывести «модель из названия»
+     * при placeholder-модели в БД (как в {@see \App\Livewire\Storefront\ProductGrid::getVehicleModelsProperty}).
+     *
+     * @param  callable(\Illuminate\Database\Eloquent\Builder<\App\Models\Product>):void  $constrainProducts
+     * @return Collection<int, string>
+     */
+    public static function distinctMakesInferrableFromProductNamesForPlaceholderVehicles(callable $constrainProducts): Collection
+    {
+        $q = Product::query()->active();
+        $constrainProducts($q);
+
+        $makes = $q->whereHas('vehicles', function (Builder $vq): void {
+            self::wherePlaceholderVehicleModel($vq, 'vehicles.model');
+        })
+            ->get(['id', 'name'])
+            ->map(function (Product $p): ?string {
+                $hit = self::firstMakeAndTailFromName((string) $p->name);
+                if ($hit === null) {
+                    return null;
+                }
+
+                $make = trim((string) ($hit['make'] ?? ''));
+                if ($make === '') {
+                    return null;
+                }
+
+                if (StorefrontVehicleProductNameConsistency::conflictsWithSelectedVehicleMake((string) $p->name, $make)) {
+                    return null;
+                }
+
+                return $make;
+            })
+            ->filter()
+            ->unique()
+            ->sort()
+            ->values();
+
+        return $makes;
     }
 }

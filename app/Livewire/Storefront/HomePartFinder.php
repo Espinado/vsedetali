@@ -77,12 +77,7 @@ class HomePartFinder extends Component
 
     public function getVehicleMakesProperty(): Collection
     {
-        return Vehicle::query()
-            ->whereHas('products', fn (Builder $q) => $q->where('is_active', true))
-            ->select('make')
-            ->distinct()
-            ->orderBy('make')
-            ->pluck('make');
+        return StorefrontVehicleProductNameConsistency::makesHavingStorefrontVisibleVehicleVariants();
     }
 
     /**

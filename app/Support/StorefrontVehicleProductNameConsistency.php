@@ -3,6 +3,7 @@
 namespace App\Support;
 
 use App\Models\Product;
+use App\Models\Vehicle;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
@@ -16,6 +17,9 @@ use Illuminate\Support\Facades\DB;
  */
 final class StorefrontVehicleProductNameConsistency
 {
+    /** @var Collection<int, string>|null */
+    private static ?Collection $makesWithVisibleVariantsCache = null;
+
     /**
      * ID активных товаров, привязанных к записи ТС (и году по pivot при $vehicleYear > 0),
      * у которых название не содержит явной «чужой» марки относительно выбранной.
@@ -171,6 +175,41 @@ final class StorefrontVehicleProductNameConsistency
         }
 
         return collect(array_keys($out))->sort()->values();
+    }
+
+    /**
+     * Марки, для которых есть хотя бы одна запись ТС с товарами, пригодными для витрины
+     * (та же логика, что {@see vehicleIdsWithStorefrontVisibleProductsForMake} — непустой список модификаций).
+     *
+     * @return Collection<int, string>
+     */
+    public static function makesHavingStorefrontVisibleVehicleVariants(): Collection
+    {
+        if (self::$makesWithVisibleVariantsCache !== null) {
+            return self::$makesWithVisibleVariantsCache;
+        }
+
+        $makes = Vehicle::query()
+            ->whereHas('products', fn (Builder $q) => $q->where('is_active', true))
+            ->select('make')
+            ->distinct()
+            ->orderBy('make')
+            ->pluck('make')
+            ->map(fn ($m) => trim((string) $m))
+            ->filter()
+            ->unique()
+            ->values();
+
+        self::$makesWithVisibleVariantsCache = $makes
+            ->filter(fn (string $make): bool => self::vehicleIdsWithStorefrontVisibleProductsForMake($make)->isNotEmpty())
+            ->values();
+
+        return self::$makesWithVisibleVariantsCache;
+    }
+
+    public static function clearMakesWithVisibleVariantsCache(): void
+    {
+        self::$makesWithVisibleVariantsCache = null;
     }
 
     private static function hiddenCategorySlugLike(): string
