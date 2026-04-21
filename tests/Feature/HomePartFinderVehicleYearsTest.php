@@ -354,6 +354,60 @@ class HomePartFinderVehicleYearsTest extends TestCase
             ->assertDontSee('HF-GEELY-OPORA', false);
     }
 
+    public function test_parts_hide_exeed_in_name_even_without_exeed_vehicle_make_row(): void
+    {
+        $cat = Category::create([
+            'name' => 'Топливный фильтр HF',
+            'slug' => 'cat-hf-fuel-filter',
+            'is_active' => true,
+        ]);
+        $brand = Brand::create([
+            'name' => 'BrandPeugeotHf',
+            'slug' => 'brand-peugeot-hf',
+            'is_active' => true,
+        ]);
+        $vehiclePeugeot = Vehicle::create([
+            'make' => 'Peugeot',
+            'model' => '205',
+            'generation' => null,
+            'year_from' => 1983,
+            'year_to' => 1990,
+            'engine' => null,
+            'body_type' => null,
+        ]);
+        Product::create([
+            'category_id' => $cat->id,
+            'brand_id' => $brand->id,
+            'sku' => 'HF-PG-ANCHOR',
+            'name' => 'Топливный фильтр Peugeot 205',
+            'slug' => 'test-hf-pg-anchor',
+            'price' => 1,
+            'is_active' => true,
+            'type' => 'part',
+        ])->vehicles()->attach($vehiclePeugeot->id);
+
+        $wrong = Product::create([
+            'category_id' => $cat->id,
+            'brand_id' => $brand->id,
+            'sku' => 'HF-EXEED-DEFLECTOR',
+            'name' => 'Дефлектор вентиляции правый 302000395AA Exeed LX',
+            'slug' => 'test-hf-exeed-deflector',
+            'price' => 99,
+            'is_active' => true,
+            'type' => 'part',
+        ]);
+        $wrong->vehicles()->attach($vehiclePeugeot->id);
+
+        ProductNameVehicleExtractor::clearMakesCache();
+
+        Livewire::test(HomePartFinder::class)
+            ->set('vehicleMake', 'Peugeot')
+            ->set('vehicleId', $vehiclePeugeot->id)
+            ->set('categoryId', $cat->id)
+            ->assertSee('HF-PG-ANCHOR', false)
+            ->assertDontSee('HF-EXEED-DEFLECTOR', false);
+    }
+
     public function test_parts_list_respects_category_and_vehicle(): void
     {
         $catSensors = Category::create([

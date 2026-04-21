@@ -144,9 +144,6 @@ class AutoPartsCatalogService
                 $best['candidate_score'] = $score;
             }
 
-            if ($score >= $minScore) {
-                return $best;
-            }
         }
 
         if ($bestScore >= $minScore) {
@@ -617,12 +614,10 @@ class AutoPartsCatalogService
     {
         $oemSearch = $this->searchByOemArticleNumber($articleOemNo);
         $rows = is_array($oemSearch) && array_is_list($oemSearch) ? $oemSearch : [];
-        $first = $rows[0] ?? null;
-        $articleId = is_array($first) && isset($first['articleId']) && is_numeric($first['articleId'])
-            ? (int) $first['articleId']
-            : null;
-        $manufacturerId = is_array($first) && isset($first['manufacturerId']) && is_numeric($first['manufacturerId'])
-            ? (int) $first['manufacturerId']
+        $selectedRow = $this->selectBestOemSearchRow($rows, $articleOemNo);
+        $articleId = $this->extractArticleIdFromRow($selectedRow);
+        $manufacturerId = is_array($selectedRow) && isset($selectedRow['manufacturerId']) && is_numeric($selectedRow['manufacturerId'])
+            ? (int) $selectedRow['manufacturerId']
             : null;
 
         $suppliers = $this->uniqueSuppliersFromOemRows($rows);
@@ -984,7 +979,7 @@ class AutoPartsCatalogService
     {
         $search = $this->searchByArticleNumber($articleNo);
         $rows = $this->normalizeSearchRows($search);
-        $firstId = $this->firstArticleId($rows);
+        $firstId = $this->firstArticleId($rows, $articleNo);
         $category = $firstId !== null ? $this->getCategoryByArticleId($firstId) : null;
 
         return [
@@ -1208,12 +1203,10 @@ class AutoPartsCatalogService
 
         $oemSearch = $this->searchByOemArticleNumber($articleOemNo);
         $oemRows = is_array($oemSearch) && array_is_list($oemSearch) ? $oemSearch : [];
-        $first = $oemRows[0] ?? null;
-        $firstArr = is_array($first) ? $first : [];
+        $selectedRow = $this->selectBestOemSearchRow($oemRows, $articleOemNo);
+        $firstArr = is_array($selectedRow) ? $selectedRow : [];
 
-        $articleId = isset($firstArr['articleId']) && is_numeric($firstArr['articleId'])
-            ? (int) $firstArr['articleId']
-            : null;
+        $articleId = $this->extractArticleIdFromRow($selectedRow);
 
         $categoryRaw = $articleId !== null ? $this->getCategoryByArticleId($articleId) : null;
         $categoryParts = $this->splitCategoryLevels($categoryRaw);
@@ -2233,23 +2226,109 @@ class AutoPartsCatalogService
     /**
      * @param  array<int, mixed>  $rows
      */
-    protected function firstArticleId(array $rows): ?int
+    protected function firstArticleId(array $rows, ?string $expectedProductName = null): ?int
+    {
+        $selectedRow = $this->selectBestSearchRow($rows, $expectedProductName);
+
+        return $this->extractArticleIdFromRow($selectedRow);
+    }
+
+    /**
+     * @param  array<int, mixed>  $rows
+     * @return array<string, mixed>|null
+     */
+    protected function selectBestSearchRow(array $rows, ?string $expectedProductName = null): ?array
     {
         if ($rows === []) {
             return null;
         }
 
-        $first = $rows[0] ?? null;
-        if (! is_array($first)) {
+        $expected = trim((string) $expectedProductName);
+        $bestRow = null;
+        $bestScore = -1.0;
+
+        foreach ($rows as $row) {
+            if (! is_array($row) || $this->extractArticleIdFromRow($row) === null) {
+                continue;
+            }
+
+            $score = 0.0;
+            if ($expected !== '') {
+                $candidateLabel = trim(implode(' ', array_filter([
+                    isset($row['articleProductName']) ? (string) $row['articleProductName'] : '',
+                    isset($row['articleNo']) ? (string) $row['articleNo'] : '',
+                    isset($row['supplierName']) ? (string) $row['supplierName'] : '',
+                ], static fn (string $v): bool => trim($v) !== '')));
+                $score += $this->keywordOverlapRatio($expected, $candidateLabel);
+            }
+
+            if ($bestRow === null || $score > $bestScore) {
+                $bestRow = $row;
+                $bestScore = $score;
+            }
+        }
+
+        return $bestRow;
+    }
+
+    /**
+     * @param  array<int, mixed>  $rows
+     * @return array<string, mixed>|null
+     */
+    protected function selectBestOemSearchRow(array $rows, ?string $articleOemNo = null): ?array
+    {
+        if ($rows === []) {
             return null;
         }
 
-        if (isset($first['articleId']) && is_numeric($first['articleId'])) {
-            return (int) $first['articleId'];
+        $oemNorm = Str::upper(preg_replace('/[^A-Z0-9]+/', '', (string) $articleOemNo) ?? '');
+        $bestRow = null;
+        $bestScore = PHP_INT_MIN;
+
+        foreach ($rows as $row) {
+            if (! is_array($row) || $this->extractArticleIdFromRow($row) === null) {
+                continue;
+            }
+
+            $score = 0;
+            $articleNoNorm = Str::upper(preg_replace('/[^A-Z0-9]+/', '', (string) ($row['articleNo'] ?? '')) ?? '');
+            if ($oemNorm !== '' && $articleNoNorm === $oemNorm) {
+                $score += 120;
+            }
+            if ($oemNorm !== '' && $articleNoNorm !== '' && str_contains($articleNoNorm, $oemNorm)) {
+                $score += 40;
+            }
+
+            $label = trim(implode(' ', array_filter([
+                isset($row['articleProductName']) ? (string) $row['articleProductName'] : '',
+                isset($row['articleNo']) ? (string) $row['articleNo'] : '',
+            ], static fn (string $v): bool => trim($v) !== '')));
+            $score += (int) round($this->keywordOverlapRatio((string) $articleOemNo, $label) * 20);
+
+            if ($bestRow === null || $score > $bestScore) {
+                $bestRow = $row;
+                $bestScore = $score;
+            }
         }
 
-        if (isset($first['article_id']) && is_numeric($first['article_id'])) {
-            return (int) $first['article_id'];
+        return $bestRow;
+    }
+
+    /**
+     * @param  array<string, mixed>|null  $row
+     */
+    protected function extractArticleIdFromRow(?array $row): ?int
+    {
+        if (! is_array($row)) {
+            return null;
+        }
+
+        if (isset($row['articleId']) && is_numeric($row['articleId'])) {
+            return (int) $row['articleId'];
+        }
+
+        if (isset($row['article_id']) && is_numeric($row['article_id'])) {
+            return (int) $row['article_id'];
         }
 
         return null;
@@ -2321,7 +2400,7 @@ class AutoPartsCatalogService
 
         $search = $this->searchByArticleNumber($articleNo);
         $rows = $this->normalizeSearchRows($search);
-        $firstId = $this->firstArticleId($rows);
+        $firstId = $this->firstArticleId($rows, $articleNo);
 
         $langId = (int) config('services.auto_parts_catalog.lang_id');
         $oemEnc = rawurlencode($articleNo);

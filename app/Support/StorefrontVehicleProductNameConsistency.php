@@ -10,12 +10,15 @@ use Illuminate\Support\Facades\DB;
 /**
  * Отсекает товары, у которых в названии явно указана другая марка из каталога,
  * чем выбранная в подборе (типичный мусор в product_vehicle после ошибочного импорта).
+ *
+ * Учитываются все вхождения марок из справочника ТС в названии, а не только «первая» по длине строки;
+ * плюс явные токены вроде Exeed, которых может не быть в поле vehicles.make.
  */
 final class StorefrontVehicleProductNameConsistency
 {
     /**
      * ID активных товаров, привязанных к записи ТС (и году по pivot при $vehicleYear > 0),
-     * у которых название не начинается с «чужой» марки из каталога.
+     * у которых название не содержит явной «чужой» марки относительно выбранной.
      *
      * @return Collection<int, int>
      */
@@ -54,12 +57,31 @@ final class StorefrontVehicleProductNameConsistency
             return false;
         }
 
-        $hit = ProductNameVehicleExtractor::firstMakeAndTailFromName($productName);
-        if ($hit === null) {
+        $nameKeys = [];
+
+        foreach (ProductNameVehicleExtractor::distinctMakesHavingProducts() as $make) {
+            if (ProductNameVehicleExtractor::tailAfterMake($productName, $make) === null) {
+                continue;
+            }
+            $k = self::normalizeMakeKey($make);
+            if ($k !== '') {
+                $nameKeys[$k] = true;
+            }
+        }
+
+        foreach (self::normalizedMakeKeysExplicitInProductName($productName) as $k) {
+            if ($k !== '') {
+                $nameKeys[$k] = true;
+            }
+        }
+
+        if ($nameKeys === []) {
             return false;
         }
 
-        return ! self::sameMakeFamily($hit['make'], $selected);
+        $selectedKey = self::normalizeMakeKey($selected);
+
+        return $selectedKey === '' || ! isset($nameKeys[$selectedKey]);
     }
 
     public static function sameMakeFamily(string $makeFromName, string $selectedMake): bool
@@ -89,7 +111,27 @@ final class StorefrontVehicleProductNameConsistency
             return 'mercedes';
         }
 
+        if (in_array($m, ['chery', 'чери'], true) || $m === 'exeed') {
+            return 'chery_exeed';
+        }
+
         return $m;
+    }
+
+    /**
+     * Марки/суббренды по тексту названия, если их нет как отдельной строки vehicles.make.
+     *
+     * @return list<string>
+     */
+    private static function normalizedMakeKeysExplicitInProductName(string $productName): array
+    {
+        $lower = mb_strtolower($productName);
+        $keys = [];
+        if (str_contains($lower, 'exeed')) {
+            $keys[] = 'chery_exeed';
+        }
+
+        return $keys;
     }
 
     /**

@@ -58,4 +58,19 @@ return [
         'article_detail_paths_extra' => env('RAPIDAPI_AUTO_PARTS_ARTICLE_DETAIL_PATHS_EXTRA', ''),
     ],
 
+    /*
+    | RapidAPI: TecDoc Catalog (ronhartman) — альтернативный источник «чистых» категорий TecDoc.
+    | https://rapidapi.com/ronhartman/api/tecdoc-catalog
+    | Используется command catalog:tecdoc-lookup-by-oem для проверки качества категорий.
+    */
+    'tecdoc_catalog' => [
+        'key' => env('RAPIDAPI_TECDOC_CATALOG_KEY'),
+        'host' => env('RAPIDAPI_TECDOC_CATALOG_HOST', 'tecdoc-catalog.p.rapidapi.com'),
+        'base_url' => env('RAPIDAPI_TECDOC_CATALOG_BASE_URL', 'https://tecdoc-catalog.p.rapidapi.com'),
+        'lang_id' => (int) env('RAPIDAPI_TECDOC_CATALOG_LANG_ID', 16),
+        'country_filter_id' => (int) env('RAPIDAPI_TECDOC_CATALOG_COUNTRY_FILTER_ID', 63),
+        'vehicle_type_id' => (int) env('RAPIDAPI_TECDOC_CATALOG_VEHICLE_TYPE_ID', 1),
+        'timeout' => (int) env('RAPIDAPI_TECDOC_CATALOG_TIMEOUT', 30),
+    ],
+
 ];

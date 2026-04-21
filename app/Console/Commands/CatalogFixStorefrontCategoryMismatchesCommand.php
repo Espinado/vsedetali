@@ -4,6 +4,7 @@ namespace App\Console\Commands;
 
 use App\Models\Category;
 use App\Models\Product;
+use App\Support\CatalogStorefrontCategoryConflictDetector;
 use Illuminate\Console\Command;
 use Illuminate\Support\Str;
 
@@ -43,7 +44,7 @@ class CatalogFixStorefrontCategoryMismatchesCommand extends Command
         Product::query()
             ->where('is_active', true)
             ->whereNotNull('category_id')
-            ->with('category')
+            ->with(['category.parent'])
             ->orderBy('id')
             ->chunkById(200, function ($chunk) use (&$checked, &$candidates, &$changed, &$sample, $limit, $apply, $targetBySlug): bool {
                 foreach ($chunk as $product) {
@@ -57,15 +58,18 @@ class CatalogFixStorefrontCategoryMismatchesCommand extends Command
                         continue;
                     }
                     $name = mb_strtolower(trim((string) $product->name));
-                    $cat = mb_strtolower(trim((string) $current->name));
                     $target = null;
                     $reason = '';
 
-                    // Консервативное правило #1: "муфта/кардан" не должна жить в шарнирных категориях.
-                    $isCardanCoupling = Str::contains($name, 'кардан')
-                        || (Str::contains($name, 'муфт') && Str::contains($name, 'вала'));
-                    $looksCvJointCategory = Str::contains($cat, 'шарнир') || Str::contains($cat, 'шрус');
-                    if ($isCardanCoupling && $looksCvJointCategory) {
+                    // Консервативное правило #1: как в catalog:scan-storefront-category-conflicts — путь «родитель / лист».
+                    $parent = $current->parent;
+                    $categoryPath = $parent !== null
+                        ? $parent->name.' / '.$current->name
+                        : $current->name;
+                    if (CatalogStorefrontCategoryConflictDetector::detectForAssignedCategory(
+                        (string) $product->name,
+                        $categoryPath,
+                    ) === 'cardan_name_cvjoint_category') {
                         $target = $targetBySlug->get('td-kardannyi-val');
                         $reason = 'cardan_coupling_from_cvjoint_to_cardan';
                     }
