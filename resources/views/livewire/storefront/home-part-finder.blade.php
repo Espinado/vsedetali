@@ -21,6 +21,70 @@
         @livewire('storefront.header-search', ['variant' => 'hero'], key('storefront-home-search'))
     </fieldset>
 
+    <fieldset class="mx-auto mb-5 max-w-5xl border-0 p-0">
+        <legend class="mb-1.5 block w-full text-center text-xs font-medium text-stone-600 sm:text-left sm:text-[13px]">Поиск по VIN</legend>
+        <form wire:submit.prevent="decodeVin" class="grid grid-cols-1 gap-2 sm:grid-cols-[1fr_auto]">
+            <input
+                type="search"
+                wire:model.defer="vin"
+                maxlength="32"
+                placeholder="Введите VIN (17 символов)"
+                class="w-full min-w-0 rounded-lg border border-orange-200/90 bg-white px-3 py-2.5 text-sm text-stone-900 shadow-sm ring-1 ring-orange-100/80 placeholder:text-stone-400 focus:border-orange-500 focus:outline-none focus:ring-2 focus:ring-orange-500/30"
+            >
+            <button
+                type="submit"
+                class="rounded-lg bg-orange-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-orange-700 focus:outline-none focus:ring-2 focus:ring-orange-500/40"
+            >
+                Проверить VIN
+            </button>
+        </form>
+        @error('vin')
+            <p class="mt-2 text-sm text-rose-600">{{ $message }}</p>
+        @enderror
+
+        @if($vinDecodeResult !== null)
+            <div class="mt-3 rounded-xl border border-orange-100/90 bg-white p-3 shadow-sm">
+                <p class="text-sm font-semibold {{ $vinDecodeResult['success'] ? 'text-emerald-700' : 'text-amber-700' }}">
+                    {{ $vinDecodeResult['success'] ? 'VIN проверен' : 'VIN проверен с предупреждениями' }}
+                </p>
+                @if(!empty($vinDecodeResult['provider_used']))
+                    <p class="mt-1 text-xs text-stone-600">
+                        Источник: {{ $vinDecodeResult['provider_used'] }}
+                    </p>
+                @endif
+                @if(trim($vinDecodeMessage) !== '')
+                    <p class="mt-1 text-xs text-stone-600">{{ $vinDecodeMessage }}</p>
+                @endif
+                <div class="mt-2 grid grid-cols-1 gap-x-4 gap-y-1 text-sm text-stone-700 sm:grid-cols-2">
+                    <p><span class="font-medium text-stone-900">Марка:</span> {{ $vinDecodeResult['make'] ?: '—' }}</p>
+                    <p><span class="font-medium text-stone-900">Модель:</span> {{ $vinDecodeResult['model'] ?: '—' }}</p>
+                    <p><span class="font-medium text-stone-900">Год:</span> {{ $vinDecodeResult['model_year'] ?: '—' }}</p>
+                    <p><span class="font-medium text-stone-900">Кузов:</span> {{ $vinDecodeResult['body_class'] ?: '—' }}</p>
+                    <p><span class="font-medium text-stone-900">Двигатель:</span> {{ $vinDecodeResult['engine'] ?: '—' }}</p>
+                    <p><span class="font-medium text-stone-900">Топливо:</span> {{ $vinDecodeResult['fuel_type'] ?: '—' }}</p>
+                    <p><span class="font-medium text-stone-900">Трансмиссия:</span> {{ $vinDecodeResult['transmission'] ?: '—' }}</p>
+                </div>
+
+                <div class="mt-3 border-t border-orange-100 pt-3">
+                    <p class="text-sm font-medium text-stone-900">Категории запчастей (RapidAPI)</p>
+                    @if($vinCategories !== [])
+                        <div class="mt-2 flex flex-wrap gap-2">
+                            @foreach($vinCategories as $cat)
+                                <span class="rounded-full border border-orange-200 bg-orange-50 px-2.5 py-1 text-xs text-orange-900">
+                                    {{ $cat['name'] ?? '—' }}
+                                </span>
+                            @endforeach
+                        </div>
+                    @elseif(trim($vinCategoriesMessage) !== '')
+                        <p class="mt-1 text-xs text-stone-600">{{ $vinCategoriesMessage }}</p>
+                    @else
+                        <p class="mt-1 text-xs text-stone-600">Категории пока не найдены.</p>
+                    @endif
+                </div>
+            </div>
+        @endif
+    </fieldset>
+
     <div class="mx-auto max-w-5xl rounded-2xl border border-orange-100/90 bg-gradient-to-b from-white/95 to-orange-50/30 p-4 shadow-lg shadow-orange-950/10 backdrop-blur-sm sm:p-5 md:p-6">
         <h2 class="mb-0.5 text-center text-lg font-bold text-stone-900 sm:text-xl">Подбор запчасти по автомобилю</h2>
         <p class="mb-4 text-center text-xs text-stone-600 sm:mb-5 sm:text-sm">Марка → модификация → категория → деталь</p>

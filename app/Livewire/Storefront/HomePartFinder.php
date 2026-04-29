@@ -6,6 +6,8 @@ use App\Models\Category;
 use App\Models\Product;
 use App\Models\ProductCrossNumber;
 use App\Models\Vehicle;
+use App\Services\AutoPartsCatalogService;
+use App\Services\VinDecoderService;
 use App\Support\StorefrontVehicleFilter;
 use App\Support\StorefrontVehicleProductNameConsistency;
 use Illuminate\Database\Eloquent\Builder;
@@ -24,6 +26,19 @@ class HomePartFinder extends Component
 
     /** Поиск из шапки (показываем блок результатов на главной). */
     public string $search = '';
+
+    /** Поиск автомобиля по VIN (вторым блоком под «Поиск по номеру»). */
+    public string $vin = '';
+
+    /** @var array<string,mixed>|null */
+    public ?array $vinDecodeResult = null;
+
+    public string $vinDecodeMessage = '';
+
+    /** @var list<array{name:string,id:int|null}> */
+    public array $vinCategories = [];
+
+    public string $vinCategoriesMessage = '';
 
     protected $queryString = [
         'vehicleMake' => ['except' => ''],
@@ -278,6 +293,123 @@ class HomePartFinder extends Component
         $this->categoryId = 0;
         $this->productId = 0;
         $this->vehicleId = 0;
+    }
+
+    public function decodeVin(): void
+    {
+        $validated = $this->validate([
+            'vin' => [
+                'required',
+                'string',
+                'min:11',
+                'max:32',
+                'not_regex:/<\s*script/i',
+                'not_regex:/javascript\s*:/i',
+                'not_regex:/on\w+\s*=/i',
+            ],
+        ]);
+
+        $this->vin = trim((string) $validated['vin']);
+
+        /** @var VinDecoderService $decoder */
+        $decoder = app(VinDecoderService::class);
+        $decoded = $decoder->decode($this->vin);
+        $decoded = $this->localizeVinResult($decoded);
+
+        $this->vinDecodeResult = $decoded;
+        $this->vinDecodeMessage = (string) ($decoded['message'] ?? '');
+
+        $this->vinCategories = [];
+        $this->vinCategoriesMessage = '';
+        $make = trim((string) ($decoded['make'] ?? ''));
+        $model = trim((string) ($decoded['model'] ?? ''));
+        $year = is_numeric($decoded['model_year'] ?? null) ? (int) $decoded['model_year'] : null;
+        if ($make !== '' && $model !== '') {
+            /** @var AutoPartsCatalogService $catalog */
+            $catalog = app(AutoPartsCatalogService::class);
+            if ($catalog->isConfigured()) {
+                try {
+                    $categoryLookup = $catalog->listCategoriesByVehicleDescriptor($make, $model, $year);
+                    $this->vinCategories = is_array($categoryLookup['categories'] ?? null) ? $categoryLookup['categories'] : [];
+                    $this->vinCategoriesMessage = (string) ($categoryLookup['message'] ?? '');
+                } catch (\Throwable $e) {
+                    $this->vinCategoriesMessage = 'Не удалось получить категории из каталога API: '.$e->getMessage();
+                }
+            } else {
+                $this->vinCategoriesMessage = 'RapidAPI каталог не настроен (RAPIDAPI_AUTO_PARTS_KEY).';
+            }
+        }
+    }
+
+    /**
+     * @param  array<string,mixed>  $decoded
+     * @return array<string,mixed>
+     */
+    protected function localizeVinResult(array $decoded): array
+    {
+        $decoded['body_class'] = $this->translateVinValue((string) ($decoded['body_class'] ?? ''), [
+            'wagon' => 'Универсал',
+            'sedan' => 'Седан',
+            'hatchback' => 'Хэтчбек',
+            'coupe' => 'Купе',
+            'convertible' => 'Кабриолет',
+            'suv' => 'Кроссовер / SUV',
+            'sport utility vehicle' => 'Кроссовер / SUV',
+            'minivan' => 'Минивэн',
+            'van' => 'Фургон',
+            'pickup' => 'Пикап',
+        ]);
+
+        $decoded['fuel_type'] = $this->translateVinValue((string) ($decoded['fuel_type'] ?? ''), [
+            'diesel' => 'Дизель',
+            'gasoline' => 'Бензин',
+            'petrol' => 'Бензин',
+            'electric' => 'Электро',
+            'hybrid' => 'Гибрид',
+            'plug-in hybrid' => 'Подключаемый гибрид',
+            'lpg' => 'Газ (LPG)',
+            'cng' => 'Метан (CNG)',
+        ]);
+
+        $decoded['drivetrain'] = $this->translateVinValue((string) ($decoded['drivetrain'] ?? ''), [
+            'front-wheel drive' => 'Передний привод',
+            'rear-wheel drive' => 'Задний привод',
+            'all-wheel drive' => 'Полный привод',
+            'four-wheel drive' => 'Полный привод',
+            '4x4' => 'Полный привод',
+            'awd' => 'Полный привод',
+            'fwd' => 'Передний привод',
+            'rwd' => 'Задний привод',
+        ]);
+
+        $decoded['transmission'] = $this->translateVinValue((string) ($decoded['transmission'] ?? ''), [
+            'manual' => 'Механика',
+            'manual/standard' => 'Механика',
+            'automatic' => 'Автомат',
+            'automatic transmission' => 'Автомат',
+            'cvt' => 'Вариатор (CVT)',
+            'robot' => 'Робот',
+            'dual clutch' => 'Робот (DCT)',
+        ]);
+
+        return $decoded;
+    }
+
+    protected function translateVinValue(string $value, array $dictionary): string
+    {
+        $trimmed = trim($value);
+        if ($trimmed === '') {
+            return '';
+        }
+
+        $lower = mb_strtolower($trimmed);
+        foreach ($dictionary as $needle => $translated) {
+            if (str_contains($lower, mb_strtolower((string) $needle))) {
+                return $translated;
+            }
+        }
+
+        return $trimmed;
     }
 
     /**

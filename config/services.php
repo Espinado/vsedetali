@@ -73,4 +73,29 @@ return [
         'timeout' => (int) env('RAPIDAPI_TECDOC_CATALOG_TIMEOUT', 30),
     ],
 
+    /*
+    | NHTSA VIN Decoder API (бесплатный публичный декодер VIN)
+    | https://vpic.nhtsa.dot.gov/api/
+    */
+    'vin_decoder' => [
+        'base_url' => env('VIN_DECODER_BASE_URL', 'https://vpic.nhtsa.dot.gov/api'),
+        'timeout' => (int) env('VIN_DECODER_TIMEOUT', 20),
+        // Vincario fallback (good EU VIN coverage).
+        'vincario_base_url' => env('VIN_DECODER_VINCARIO_BASE_URL', 'https://api.vincario.com/3.2'),
+        'vincario_api_key' => env('VIN_DECODER_VINCARIO_API_KEY'),
+        'vincario_secret_key' => env('VIN_DECODER_VINCARIO_SECRET_KEY'),
+        'vincario_timeout' => (int) env('VIN_DECODER_VINCARIO_TIMEOUT', 20),
+        // RapidAPI VIN fallback (higher priority than other secondary providers).
+        'rapidapi_key' => env('RAPIDAPI_VIN_DECODER_KEY', env('RAPIDAPI_AUTO_PARTS_KEY')),
+        'rapidapi_host' => env('RAPIDAPI_VIN_DECODER_HOST', 'vin-decoder-api1.p.rapidapi.com'),
+        'rapidapi_base_url' => env('RAPIDAPI_VIN_DECODER_BASE_URL', 'https://vin-decoder-api1.p.rapidapi.com'),
+        'rapidapi_path' => env('RAPIDAPI_VIN_DECODER_PATH', '/decode'),
+        'rapidapi_timeout' => (int) env('RAPIDAPI_VIN_DECODER_TIMEOUT', 20),
+        // Optional secondary provider (example: api-ninjas vinlookup).
+        'secondary_provider' => env('VIN_DECODER_SECONDARY_PROVIDER', 'api_ninjas'),
+        'secondary_base_url' => env('VIN_DECODER_SECONDARY_BASE_URL', 'https://api.api-ninjas.com/v1'),
+        'secondary_key' => env('VIN_DECODER_SECONDARY_KEY'),
+        'secondary_timeout' => (int) env('VIN_DECODER_SECONDARY_TIMEOUT', 20),
+    ],
+
 ];

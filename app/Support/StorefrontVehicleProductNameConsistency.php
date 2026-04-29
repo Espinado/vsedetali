@@ -17,8 +17,13 @@ use Illuminate\Support\Facades\DB;
  */
 final class StorefrontVehicleProductNameConsistency
 {
-    /** @var Collection<int, string>|null */
-    private static ?Collection $makesWithVisibleVariantsCache = null;
+    /**
+     * Индекс «марка → id ТС с витринно-валидными товарами» + отсортированный список марок.
+     * Строится одним SQL вместо N запросов (раньше на каждую марку вызывался тяжёлый join).
+     *
+     * @var array{by_make_lower: array<string, Collection<int, int>>, makes: Collection<int, string>}|null
+     */
+    private static ?array $storefrontVisibleVehiclesIndex = null;
 
     /**
      * ID активных товаров, привязанных к записи ТС (и году по pivot при $vehicleYear > 0),
@@ -151,30 +156,9 @@ final class StorefrontVehicleProductNameConsistency
             return collect();
         }
 
-        $rows = DB::table('product_vehicle')
-            ->join('products', 'products.id', '=', 'product_vehicle.product_id')
-            ->join('vehicles', 'vehicles.id', '=', 'product_vehicle.vehicle_id')
-            ->join('categories', 'categories.id', '=', 'products.category_id')
-            ->where('products.is_active', true)
-            ->whereRaw('LOWER(vehicles.make) = ?', [$makeLower])
-            ->where('categories.is_active', true)
-            ->where('categories.slug', 'not like', self::hiddenCategorySlugLike())
-            ->select(['vehicles.id as vehicle_id', 'products.name as product_name', 'vehicles.make as vehicle_make'])
-            ->get();
+        $idx = self::ensureStorefrontVisibleVehicleIndex();
 
-        $out = [];
-        foreach ($rows->groupBy('vehicle_id') as $vehicleId => $group) {
-            $vehicleMake = trim((string) ($group->first()->vehicle_make ?? ''));
-            foreach ($group as $row) {
-                if (! self::conflictsWithSelectedVehicleMake((string) $row->product_name, $vehicleMake)) {
-                    $out[(int) $vehicleId] = true;
-
-                    break;
-                }
-            }
-        }
-
-        return collect(array_keys($out))->sort()->values();
+        return $idx['by_make_lower'][$makeLower] ?? collect();
     }
 
     /**
@@ -185,31 +169,92 @@ final class StorefrontVehicleProductNameConsistency
      */
     public static function makesHavingStorefrontVisibleVehicleVariants(): Collection
     {
-        if (self::$makesWithVisibleVariantsCache !== null) {
-            return self::$makesWithVisibleVariantsCache;
-        }
-
-        $makes = Vehicle::query()
-            ->whereHas('products', fn (Builder $q) => $q->where('is_active', true))
-            ->select('make')
-            ->distinct()
-            ->orderBy('make')
-            ->pluck('make')
-            ->map(fn ($m) => trim((string) $m))
-            ->filter()
-            ->unique()
-            ->values();
-
-        self::$makesWithVisibleVariantsCache = $makes
-            ->filter(fn (string $make): bool => self::vehicleIdsWithStorefrontVisibleProductsForMake($make)->isNotEmpty())
-            ->values();
-
-        return self::$makesWithVisibleVariantsCache;
+        return self::ensureStorefrontVisibleVehicleIndex()['makes'];
     }
 
     public static function clearMakesWithVisibleVariantsCache(): void
     {
-        self::$makesWithVisibleVariantsCache = null;
+        self::$storefrontVisibleVehiclesIndex = null;
+    }
+
+    /**
+     * @return array{by_make_lower: array<string, Collection<int, int>>, makes: Collection<int, string>}
+     */
+    private static function ensureStorefrontVisibleVehicleIndex(): array
+    {
+        if (self::$storefrontVisibleVehiclesIndex !== null) {
+            return self::$storefrontVisibleVehiclesIndex;
+        }
+
+        $rows = DB::table('product_vehicle')
+            ->join('products', 'products.id', '=', 'product_vehicle.product_id')
+            ->join('vehicles', 'vehicles.id', '=', 'product_vehicle.vehicle_id')
+            ->join('categories', 'categories.id', '=', 'products.category_id')
+            ->where('products.is_active', true)
+            ->where('categories.is_active', true)
+            ->where('categories.slug', 'not like', self::hiddenCategorySlugLike())
+            ->select(['vehicles.id as vehicle_id', 'products.name as product_name', 'vehicles.make as vehicle_make'])
+            ->orderBy('vehicles.id')
+            ->get();
+
+        /** @var array<int, list<\stdClass>> $byVehicle */
+        $byVehicle = [];
+        foreach ($rows as $row) {
+            $vid = (int) $row->vehicle_id;
+            if (! isset($byVehicle[$vid])) {
+                $byVehicle[$vid] = [];
+            }
+            $byVehicle[$vid][] = $row;
+        }
+
+        /** @var array<string, array<int, true>> $byMake */
+        $byMake = [];
+        /** @var array<string, string> $canonicalMake */
+        $canonicalMake = [];
+
+        foreach ($byVehicle as $vehicleId => $group) {
+            $vehicleMake = trim((string) ($group[0]->vehicle_make ?? ''));
+            if ($vehicleMake === '') {
+                continue;
+            }
+            $makeLower = mb_strtolower($vehicleMake);
+            $ok = false;
+            foreach ($group as $row) {
+                if (! self::conflictsWithSelectedVehicleMake((string) $row->product_name, $vehicleMake)) {
+                    $ok = true;
+
+                    break;
+                }
+            }
+            if (! $ok) {
+                continue;
+            }
+            if (! isset($byMake[$makeLower])) {
+                $byMake[$makeLower] = [];
+            }
+            $byMake[$makeLower][$vehicleId] = true;
+            if (! isset($canonicalMake[$makeLower])) {
+                $canonicalMake[$makeLower] = $vehicleMake;
+            }
+        }
+
+        /** @var array<string, Collection<int, int>> $collections */
+        $collections = [];
+        foreach ($byMake as $ml => $ids) {
+            $collections[$ml] = collect(array_keys($ids))->sort()->values();
+        }
+
+        $makes = collect($canonicalMake)
+            ->values()
+            ->sort(SORT_NATURAL | SORT_FLAG_CASE)
+            ->values();
+
+        self::$storefrontVisibleVehiclesIndex = [
+            'by_make_lower' => $collections,
+            'makes' => $makes,
+        ];
+
+        return self::$storefrontVisibleVehiclesIndex;
     }
 
     private static function hiddenCategorySlugLike(): string

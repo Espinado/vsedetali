@@ -1118,6 +1118,309 @@ class AutoPartsCatalogService
         return null;
     }
 
+    /**
+     * VIN flow helper: по make/model/year пытается получить категории запчастей через RapidAPI TecDoc-подобные эндпоинты.
+     * Работает best-effort: перебирает несколько вариантов маршрутов, не бросает исключения при 404.
+     *
+     * @return array{
+     *   found: bool,
+     *   make: string,
+     *   model: string,
+     *   year: int|null,
+     *   manufacturer_id: int|null,
+     *   model_id: int|null,
+     *   type_id: int|null,
+     *   categories: list<array{name:string,id:int|null}>,
+     *   message: string
+     * }
+     */
+    public function listCategoriesByVehicleDescriptor(string $make, string $model, ?int $year = null): array
+    {
+        $make = trim($make);
+        $model = trim($model);
+        $year = $year !== null && $year > 1900 ? $year : null;
+
+        $empty = [
+            'found' => false,
+            'make' => $make,
+            'model' => $model,
+            'year' => $year,
+            'manufacturer_id' => null,
+            'model_id' => null,
+            'type_id' => null,
+            'categories' => [],
+            'message' => '',
+        ];
+
+        if ($make === '' || $model === '') {
+            $empty['message'] = 'Пустая марка или модель.';
+
+            return $empty;
+        }
+
+        $langId = (int) config('services.auto_parts_catalog.lang_id', 16);
+        $typeId = (int) config('services.auto_parts_catalog.vehicle_type_id', 1);
+        $countryId = (int) config('services.auto_parts_catalog.country_filter_id', 63);
+
+        $manufacturerRows = $this->fetchManufacturerRows($langId, $typeId);
+        $manufacturerId = $this->pickManufacturerId($manufacturerRows, $make);
+        if ($manufacturerId === null) {
+            $empty['message'] = 'Производитель не найден в каталоге API.';
+
+            return $empty;
+        }
+
+        $modelRows = $this->fetchModelRows($manufacturerId, $langId);
+        $modelId = $this->pickModelId($modelRows, $model, $year);
+        if ($modelId === null) {
+            $empty['manufacturer_id'] = $manufacturerId;
+            $empty['message'] = 'Модель не найдена в каталоге API.';
+
+            return $empty;
+        }
+
+        $vehicleTypeRows = $this->fetchVehicleTypeRows($modelId, $langId, $countryId);
+        $vehicleTypeId = $this->pickVehicleTypeId($vehicleTypeRows, $year);
+        if ($vehicleTypeId === null) {
+            $empty['manufacturer_id'] = $manufacturerId;
+            $empty['model_id'] = $modelId;
+            $empty['message'] = 'Тип ТС не найден в каталоге API.';
+
+            return $empty;
+        }
+
+        $categoryRows = $this->fetchCategoryRows($vehicleTypeId, $langId);
+        $categories = $this->normalizeCategoryRows($categoryRows);
+
+        return [
+            'found' => $categories !== [],
+            'make' => $make,
+            'model' => $model,
+            'year' => $year,
+            'manufacturer_id' => $manufacturerId,
+            'model_id' => $modelId,
+            'type_id' => $vehicleTypeId,
+            'categories' => $categories,
+            'message' => $categories === []
+                ? 'Категории по выбранному авто не найдены или endpoint недоступен.'
+                : 'OK',
+        ];
+    }
+
+    /** @return list<array<string,mixed>> */
+    protected function fetchManufacturerRows(int $langId, int $vehicleTypeId): array
+    {
+        $candidates = [
+            "/manufacturers/list?langId={$langId}",
+            "/manufacturers/list-by-type/lang-id/{$langId}/type-id/{$vehicleTypeId}",
+            "/manufacturers/list-by-type/type-id/{$vehicleTypeId}/lang-id/{$langId}",
+        ];
+
+        return $this->firstListFromCandidatePaths($candidates);
+    }
+
+    /** @return list<array<string,mixed>> */
+    protected function fetchModelRows(int $manufacturerId, int $langId): array
+    {
+        $candidates = [
+            "/models/list-by-manufacturer-id/manufacturer-id/{$manufacturerId}/lang-id/{$langId}",
+            "/models/list-by-manufacturer/manufacturer-id/{$manufacturerId}/lang-id/{$langId}",
+            "/models/list?manufacturerId={$manufacturerId}&langId={$langId}",
+        ];
+
+        return $this->firstListFromCandidatePaths($candidates);
+    }
+
+    /** @return list<array<string,mixed>> */
+    protected function fetchVehicleTypeRows(int $modelId, int $langId, int $countryId): array
+    {
+        $candidates = [
+            "/types/list-by-model-id/model-id/{$modelId}/lang-id/{$langId}",
+            "/types/list-by-model-id/model-id/{$modelId}/lang-id/{$langId}/country-filter-id/{$countryId}",
+            "/types/list?modelId={$modelId}&langId={$langId}",
+        ];
+
+        return $this->firstListFromCandidatePaths($candidates);
+    }
+
+    /** @return list<array<string,mixed>> */
+    protected function fetchCategoryRows(int $vehicleTypeId, int $langId): array
+    {
+        $candidates = [
+            "/categories/list-by-type-id/type-id/{$vehicleTypeId}/lang-id/{$langId}",
+            "/categories/list-by-type-id/lang-id/{$langId}/type-id/{$vehicleTypeId}",
+            "/categories/list?typeId={$vehicleTypeId}&langId={$langId}",
+            "/categories/list?type-id={$vehicleTypeId}&langId={$langId}",
+        ];
+
+        return $this->firstListFromCandidatePaths($candidates);
+    }
+
+    /**
+     * @param  list<string>  $paths
+     * @return list<array<string,mixed>>
+     */
+    protected function firstListFromCandidatePaths(array $paths): array
+    {
+        foreach ($paths as $path) {
+            $raw = $this->tryGetJson($path);
+            if (! is_array($raw)) {
+                continue;
+            }
+            $rows = $this->extractListRows($raw);
+            if ($rows !== []) {
+                return $rows;
+            }
+        }
+
+        return [];
+    }
+
+    /**
+     * @param  array<string,mixed>|list<mixed>  $raw
+     * @return list<array<string,mixed>>
+     */
+    protected function extractListRows(array $raw): array
+    {
+        if (array_is_list($raw)) {
+            return array_values(array_filter($raw, static fn ($r): bool => is_array($r)));
+        }
+
+        foreach (['data', 'results', 'items', 'rows', 'list', 'models', 'manufacturers', 'types', 'categories'] as $key) {
+            $inner = $raw[$key] ?? null;
+            if (is_array($inner) && array_is_list($inner)) {
+                return array_values(array_filter($inner, static fn ($r): bool => is_array($r)));
+            }
+        }
+
+        return [];
+    }
+
+    /** @param list<array<string,mixed>> $rows */
+    protected function pickManufacturerId(array $rows, string $make): ?int
+    {
+        $needle = $this->normalizeName($make);
+        $fallback = null;
+        foreach ($rows as $row) {
+            $name = $this->normalizeName((string) ($row['manufacturerName'] ?? $row['name'] ?? $row['brand'] ?? ''));
+            $id = $this->extractFirstInt($row, ['manufacturerId', 'id', 'brandId']);
+            if ($name === '' || $id === null) {
+                continue;
+            }
+            if ($name === $needle) {
+                return $id;
+            }
+            if ($fallback === null && (str_contains($name, $needle) || str_contains($needle, $name))) {
+                $fallback = $id;
+            }
+        }
+
+        return $fallback;
+    }
+
+    /** @param list<array<string,mixed>> $rows */
+    protected function pickModelId(array $rows, string $model, ?int $year): ?int
+    {
+        $needle = $this->normalizeName($model);
+        $bestId = null;
+        foreach ($rows as $row) {
+            $name = $this->normalizeName((string) ($row['modelName'] ?? $row['name'] ?? ''));
+            $id = $this->extractFirstInt($row, ['modelId', 'id']);
+            if ($name === '' || $id === null) {
+                continue;
+            }
+            if (! (str_contains($name, $needle) || str_contains($needle, $name))) {
+                continue;
+            }
+            if ($year !== null && ! $this->rowMatchesYear($row, $year)) {
+                continue;
+            }
+
+            return $id;
+        }
+
+        return $bestId;
+    }
+
+    /** @param list<array<string,mixed>> $rows */
+    protected function pickVehicleTypeId(array $rows, ?int $year): ?int
+    {
+        $fallback = null;
+        foreach ($rows as $row) {
+            $id = $this->extractFirstInt($row, ['carId', 'typeId', 'vehicleId', 'id']);
+            if ($id === null) {
+                continue;
+            }
+            if ($year !== null && ! $this->rowMatchesYear($row, $year)) {
+                if ($fallback === null) {
+                    $fallback = $id;
+                }
+                continue;
+            }
+
+            return $id;
+        }
+
+        return $fallback;
+    }
+
+    /** @param list<array<string,mixed>> $rows */
+    protected function normalizeCategoryRows(array $rows): array
+    {
+        $out = [];
+        $seen = [];
+        foreach ($rows as $row) {
+            $name = trim((string) ($row['assemblyGroupName'] ?? $row['categoryName'] ?? $row['name'] ?? $row['description'] ?? ''));
+            if ($name === '') {
+                continue;
+            }
+            $id = $this->extractFirstInt($row, ['assemblyGroupNodeId', 'categoryId', 'id']);
+            $key = mb_strtolower($name).'#'.($id ?? 0);
+            if (isset($seen[$key])) {
+                continue;
+            }
+            $seen[$key] = true;
+            $out[] = ['name' => $name, 'id' => $id];
+        }
+
+        usort($out, static fn (array $a, array $b): int => strcasecmp($a['name'], $b['name']));
+
+        return $out;
+    }
+
+    /** @param array<string,mixed> $row @param list<string> $keys */
+    protected function extractFirstInt(array $row, array $keys): ?int
+    {
+        foreach ($keys as $key) {
+            if (isset($row[$key]) && is_numeric($row[$key])) {
+                return (int) $row[$key];
+            }
+        }
+
+        return null;
+    }
+
+    /** @param array<string,mixed> $row */
+    protected function rowMatchesYear(array $row, int $year): bool
+    {
+        $from = $this->extractFirstInt($row, ['yearFrom', 'modelYearFrom', 'constructionIntervalYearFrom']);
+        $to = $this->extractFirstInt($row, ['yearTo', 'modelYearTo', 'constructionIntervalYearTo']);
+        if ($from === null && $to === null) {
+            return true;
+        }
+        $from = $from ?? 1900;
+        $to = $to ?? (int) date('Y') + 1;
+
+        return $year >= $from && $year <= $to;
+    }
+
+    protected function normalizeName(string $value): string
+    {
+        $value = Str::of($value)->lower()->ascii()->replaceMatches('/[^a-z0-9]+/', ' ')->trim()->value();
+
+        return preg_replace('/\s+/u', ' ', $value) ?? $value;
+    }
+
     protected function getJson(string $pathOrQuery): ?array
     {
         if (! $this->isConfigured()) {
