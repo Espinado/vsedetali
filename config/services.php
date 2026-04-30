@@ -40,9 +40,9 @@ return [
     | https://rapidapi.com/makingdatameaningful/api/auto-parts-catalog
     */
     'auto_parts_catalog' => [
-        'key' => env('RAPIDAPI_AUTO_PARTS_KEY'),
-        'host' => env('RAPIDAPI_AUTO_PARTS_HOST', 'auto-parts-catalog.p.rapidapi.com'),
-        'base_url' => env('RAPIDAPI_AUTO_PARTS_BASE_URL', 'https://auto-parts-catalog.p.rapidapi.com'),
+        'key' => trim((string) env('RAPIDAPI_AUTO_PARTS_KEY', '')),
+        'host' => trim((string) env('RAPIDAPI_AUTO_PARTS_HOST', 'auto-parts-catalog.p.rapidapi.com')),
+        'base_url' => trim((string) env('RAPIDAPI_AUTO_PARTS_BASE_URL', 'https://auto-parts-catalog.p.rapidapi.com')),
         /** Язык данных TecDoc: 16 = ru (см. GET /languages/list), иначе задайте в .env */
         'lang_id' => (int) env('RAPIDAPI_AUTO_PARTS_LANG_ID', 16),
         /** Регион/фильтр страны: из GET /countries/list или list-countries-by-lang-id */

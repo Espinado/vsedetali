@@ -23,7 +23,7 @@ class AutoPartsCatalogService
 {
     public function isConfigured(): bool
     {
-        return (bool) config('services.auto_parts_catalog.key');
+        return trim((string) config('services.auto_parts_catalog.key')) !== '';
     }
 
     /**
@@ -414,8 +414,8 @@ class AutoPartsCatalogService
         $timeout = (int) config('services.auto_parts_catalog.timeout', 30);
         $headers = [
             'Accept' => 'application/json',
-            'X-RapidAPI-Key' => (string) config('services.auto_parts_catalog.key'),
-            'X-RapidAPI-Host' => (string) config('services.auto_parts_catalog.host'),
+            'X-RapidAPI-Key' => trim((string) config('services.auto_parts_catalog.key')),
+            'X-RapidAPI-Host' => trim((string) config('services.auto_parts_catalog.host')),
         ];
 
         $tls = $this->httpTlsOptionsForCatalog();
@@ -1170,7 +1170,7 @@ class AutoPartsCatalogService
 
         $manufacturerRows = $this->fetchManufacturerRows($langId, $typeId);
         if ($manufacturerRows === []) {
-            $empty['message'] = 'Каталог API не вернул список производителей (проверьте ключ RapidAPI и подписку на Auto Parts Catalog).';
+            $empty['message'] = 'Каталог API не вернул список производителей. Проверьте RAPIDAPI_AUTO_PARTS_KEY (без пробелов и кавычек), что RAPIDAPI_AUTO_PARTS_HOST и RAPIDAPI_AUTO_PARTS_BASE_URL совпадают с приложением «Auto Parts Catalog» в RapidAPI, выполните php artisan config:clear на сервере. Подписка при этом может быть активной — частая причина несовпадение Host с выбранным API.';
 
             return $empty;
         }
@@ -2126,6 +2126,9 @@ class AutoPartsCatalogService
                 continue;
             }
             $rows = $this->extractListRows($raw);
+            if ($rows === []) {
+                $rows = $this->extractNestedListRowsFromJson($raw);
+            }
             if ($rows !== []) {
                 return $rows;
             }
@@ -2716,8 +2719,8 @@ class AutoPartsCatalogService
         $req = Http::acceptJson()
             ->timeout($timeout)
             ->withHeaders([
-                'X-RapidAPI-Key' => (string) config('services.auto_parts_catalog.key'),
-                'X-RapidAPI-Host' => (string) config('services.auto_parts_catalog.host'),
+                'X-RapidAPI-Key' => trim((string) config('services.auto_parts_catalog.key')),
+                'X-RapidAPI-Host' => trim((string) config('services.auto_parts_catalog.host')),
             ]);
         $tls = $this->httpTlsOptionsForCatalog();
         if ($tls !== []) {
@@ -2751,8 +2754,8 @@ class AutoPartsCatalogService
             $req = Http::acceptJson()
                 ->timeout($timeout)
                 ->withHeaders([
-                    'X-RapidAPI-Key' => (string) config('services.auto_parts_catalog.key'),
-                    'X-RapidAPI-Host' => (string) config('services.auto_parts_catalog.host'),
+                    'X-RapidAPI-Key' => trim((string) config('services.auto_parts_catalog.key')),
+                    'X-RapidAPI-Host' => trim((string) config('services.auto_parts_catalog.host')),
                 ]);
             $tls = $this->httpTlsOptionsForCatalog();
             if ($tls !== []) {
