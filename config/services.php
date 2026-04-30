@@ -50,12 +50,16 @@ return [
         'country_filter_id' => (int) env('RAPIDAPI_AUTO_PARTS_COUNTRY_FILTER_ID', 63),
         /** Тип ТС: из GET /types/list-vehicles-type (часто 1 — легковые). Используется в т.ч. в selecting-a-list-of-cars-for-oem-part-number */
         'vehicle_type_id' => (int) env('RAPIDAPI_AUTO_PARTS_VEHICLE_TYPE_ID', 1),
+        /** Макс. позиций в блоке VIN → категория → детали (главная). */
+        'vin_flow_article_list_limit' => max(1, min(100, (int) env('RAPIDAPI_AUTO_PARTS_VIN_ARTICLE_LIMIT', 48))),
         'timeout' => (int) env('RAPIDAPI_AUTO_PARTS_TIMEOUT', 30),
         /**
          * Доп. GET-пути к карточке артикула (через «|»), плейсхолдеры {articleId} и {langId}.
          * См. плейграунд RapidAPI — если «богатый» JSON с articleInfo/compatibleCars на другом маршруте.
          */
         'article_detail_paths_extra' => env('RAPIDAPI_AUTO_PARTS_ARTICLE_DETAIL_PATHS_EXTRA', ''),
+        /** true: при пустом списке категорий (VIN flow) писать в лог сводку HTTP (статус, ключи JSON, фрагмент тела). */
+        'log_category_on_empty' => filter_var(env('RAPIDAPI_AUTO_PARTS_LOG_CATEGORY_ON_EMPTY', false), FILTER_VALIDATE_BOOL),
     ],
 
     /*

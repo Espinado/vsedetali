@@ -5,6 +5,7 @@ namespace App\Services;
 use Illuminate\Http\Client\Pool;
 use Illuminate\Http\Client\Response;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
@@ -1131,10 +1132,13 @@ class AutoPartsCatalogService
      *   model_id: int|null,
      *   type_id: int|null,
      *   categories: list<array{name:string,id:int|null}>,
-     *   message: string
+     *   category_tree: list<array{id:int,name:string,children:list,article_category_id:int|null}>,
+     *   category_rows_cache_token: string|null,
+     *   message: string,
+     *   category_http_trace?: list<array{vehicle_candidate_id: int, attempts: list<array<string, mixed>>}>
      * }
      */
-    public function listCategoriesByVehicleDescriptor(string $make, string $model, ?int $year = null): array
+    public function listCategoriesByVehicleDescriptor(string $make, string $model, ?int $year = null, bool $withCategoryHttpTrace = false): array
     {
         $make = trim($make);
         $model = trim($model);
@@ -1149,6 +1153,8 @@ class AutoPartsCatalogService
             'model_id' => null,
             'type_id' => null,
             'categories' => [],
+            'category_tree' => [],
+            'category_rows_cache_token' => null,
             'message' => '',
         ];
 
@@ -1163,14 +1169,20 @@ class AutoPartsCatalogService
         $countryId = (int) config('services.auto_parts_catalog.country_filter_id', 63);
 
         $manufacturerRows = $this->fetchManufacturerRows($langId, $typeId);
-        $manufacturerId = $this->pickManufacturerId($manufacturerRows, $make);
-        if ($manufacturerId === null) {
-            $empty['message'] = 'Производитель не найден в каталоге API.';
+        if ($manufacturerRows === []) {
+            $empty['message'] = 'Каталог API не вернул список производителей (проверьте ключ RapidAPI и подписку на Auto Parts Catalog).';
 
             return $empty;
         }
 
-        $modelRows = $this->fetchModelRows($manufacturerId, $langId);
+        $manufacturerId = $this->pickManufacturerId($manufacturerRows, $make);
+        if ($manufacturerId === null) {
+            $empty['message'] = 'Марка «'.$make.'» не сопоставлена со справочником производителей в каталоге API.';
+
+            return $empty;
+        }
+
+        $modelRows = $this->fetchModelRows($manufacturerId, $langId, $typeId, $countryId);
         $modelId = $this->pickModelId($modelRows, $model, $year);
         if ($modelId === null) {
             $empty['manufacturer_id'] = $manufacturerId;
@@ -1179,21 +1191,90 @@ class AutoPartsCatalogService
             return $empty;
         }
 
-        $vehicleTypeRows = $this->fetchVehicleTypeRows($modelId, $langId, $countryId);
-        $vehicleTypeId = $this->pickVehicleTypeId($vehicleTypeRows, $year);
-        if ($vehicleTypeId === null) {
+        $vehicleTypeRows = $this->fetchVehicleTypeRows($modelId, $manufacturerId, $langId, $countryId, $typeId);
+        if ($vehicleTypeRows === []) {
             $empty['manufacturer_id'] = $manufacturerId;
             $empty['model_id'] = $modelId;
-            $empty['message'] = 'Тип ТС не найден в каталоге API.';
+            $empty['message'] = 'Каталог API не вернул список модификаций для выбранной модели (маршрут /types/… или country/lang).';
 
             return $empty;
         }
 
-        $categoryRows = $this->fetchCategoryRows($vehicleTypeId, $langId);
+        $vehicleTypeId = $this->pickVehicleTypeId($vehicleTypeRows, $year);
+        if ($vehicleTypeId === null) {
+            $empty['manufacturer_id'] = $manufacturerId;
+            $empty['model_id'] = $modelId;
+            $empty['message'] = 'В ответе каталога не удалось определить id модификации (carId/vehicleId) для подбора категорий.';
+
+            return $empty;
+        }
+
+        $vehicleCandidates = $this->collectTecdocVehicleIdCandidates($vehicleTypeRows, $vehicleTypeId);
+        $categoryRows = [];
+        $resolvedVehicleId = $vehicleTypeId;
+        $collectProbe = $withCategoryHttpTrace
+            || (bool) config('services.auto_parts_catalog.log_category_on_empty');
+        $categoryHttpTrace = [];
+
+        foreach ($vehicleCandidates as $carCandidateId) {
+            $httpAttempts = [];
+            $categoryRows = $this->fetchCategoryRows(
+                $carCandidateId,
+                $manufacturerId,
+                $langId,
+                $countryId,
+                $typeId,
+                $httpAttempts,
+                $collectProbe
+            );
+            if ($collectProbe) {
+                $categoryHttpTrace[] = [
+                    'vehicle_candidate_id' => $carCandidateId,
+                    'attempts' => $httpAttempts,
+                ];
+            }
+            if ($categoryRows !== []) {
+                $resolvedVehicleId = $carCandidateId;
+
+                break;
+            }
+        }
+        $vehicleTypeId = $resolvedVehicleId;
+
+        $categoryRows = $this->flattenCategoryTreeRows($categoryRows);
+        $categoryRowsCacheToken = null;
+        if ($categoryRows !== [] && $this->rowsLookLikeRapidApiProductGroupCategories($categoryRows)) {
+            $categoryRowsCacheToken = Str::random(48);
+            Cache::put(
+                $this->vinProductGroupCategoryRowsCacheKey($categoryRowsCacheToken),
+                [
+                    'vehicle_id' => $vehicleTypeId,
+                    'manufacturer_id' => $manufacturerId,
+                    'rows' => $categoryRows,
+                ],
+                now()->addMinutes(30),
+            );
+        }
+        $categoryTree = $this->buildCategoryNavigationTreeFromProductGroupRows($categoryRows);
         $categories = $this->normalizeCategoryRows($categoryRows);
 
-        return [
-            'found' => $categories !== [],
+        if ($categories === [] && $categoryTree === [] && (bool) config('services.auto_parts_catalog.log_category_on_empty')) {
+            Log::warning('auto_parts_catalog.categories_empty', [
+                'make' => $make,
+                'model' => $model,
+                'year' => $year,
+                'manufacturer_id' => $manufacturerId,
+                'model_id' => $modelId,
+                'vehicle_candidates' => $vehicleCandidates,
+                'resolved_vehicle_id' => $vehicleTypeId,
+                'trace' => $categoryHttpTrace,
+            ]);
+        }
+
+        $hasCategories = $categories !== [] || $categoryTree !== [];
+
+        $out = [
+            'found' => $hasCategories,
             'make' => $make,
             'model' => $model,
             'year' => $year,
@@ -1201,16 +1282,630 @@ class AutoPartsCatalogService
             'model_id' => $modelId,
             'type_id' => $vehicleTypeId,
             'categories' => $categories,
-            'message' => $categories === []
+            'category_tree' => $categoryTree,
+            'category_rows_cache_token' => $categoryRowsCacheToken,
+            'message' => ! $hasCategories
                 ? 'Категории по выбранному авто не найдены или endpoint недоступен.'
                 : 'OK',
         ];
+        if ($withCategoryHttpTrace) {
+            $out['category_http_trace'] = $categoryHttpTrace;
+        }
+
+        return $out;
+    }
+
+    protected function vinProductGroupCategoryRowsCacheKey(string $token): string
+    {
+        return 'auto_parts_catalog.pg_rows.'.$token;
+    }
+
+    /**
+     * @param  list<array<string,mixed>>  $rows
+     */
+    protected function rowsLookLikeRapidApiProductGroupCategories(array $rows): bool
+    {
+        foreach ($rows as $row) {
+            if (is_array($row) && isset($row['categoryName1'], $row['categoryId1'])) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * @return array{rows: list<array<string,mixed>>, vehicle_id: int, manufacturer_id: int}|null
+     */
+    protected function readVinProductGroupRowsPayload(string $cacheToken, int $tecDocVehicleId, int $manufacturerId): ?array
+    {
+        if ($cacheToken === '' || strlen($cacheToken) > 64) {
+            return null;
+        }
+        $payload = Cache::get($this->vinProductGroupCategoryRowsCacheKey($cacheToken));
+        if (! is_array($payload) || ! isset($payload['rows'], $payload['vehicle_id'])) {
+            return null;
+        }
+        if ((int) $payload['vehicle_id'] !== $tecDocVehicleId) {
+            return null;
+        }
+        $pmfr = (int) ($payload['manufacturer_id'] ?? 0);
+        if ($pmfr !== $manufacturerId) {
+            return null;
+        }
+        if (! is_array($payload['rows'])) {
+            return null;
+        }
+
+        return [
+            'rows' => array_values(array_filter($payload['rows'], 'is_array')),
+            'vehicle_id' => (int) $payload['vehicle_id'],
+            'manufacturer_id' => $pmfr,
+        ];
+    }
+
+    /**
+     * @param  list<array<string,mixed>>  $rows
+     * @param  list<int>  $pathSegmentIds  categoryId1, categoryId2, … по порядку
+     * @return list<array<string,mixed>>
+     */
+    protected function filterProductGroupRowsByAncestorPath(array $rows, array $pathSegmentIds): array
+    {
+        if ($pathSegmentIds === []) {
+            return array_values(array_filter($rows, 'is_array'));
+        }
+        $out = [];
+        foreach ($rows as $row) {
+            if (! is_array($row)) {
+                continue;
+            }
+            $ok = true;
+            foreach ($pathSegmentIds as $idx => $pid) {
+                $k = 'categoryId'.($idx + 1);
+                if (! isset($row[$k]) || ! is_numeric($row[$k]) || (int) $row[$k] !== (int) $pid) {
+                    $ok = false;
+                    break;
+                }
+            }
+            if ($ok) {
+                $out[] = $row;
+            }
+        }
+
+        return $out;
+    }
+
+    /**
+     * Подкатегории для **этой** модификации по уже загруженным строкам каталога (кэш после VIN).
+     *
+     * @param  list<int>  $parentSegmentIds  пусто — верхний уровень; иначе цепочка categoryId1…
+     * @return array{nodes: list<array{id:int,name:string,has_children:bool}>, error: string}
+     */
+    public function listVinProductGroupChildren(
+        string $cacheToken,
+        int $tecDocVehicleId,
+        int $manufacturerId,
+        array $parentSegmentIds,
+    ): array {
+        $empty = ['nodes' => [], 'error' => ''];
+        $cleanPath = [];
+        foreach ($parentSegmentIds as $p) {
+            $i = (int) $p;
+            if ($i <= 0) {
+                return $empty;
+            }
+            $cleanPath[] = $i;
+            if (count($cleanPath) >= 4) {
+                break;
+            }
+        }
+        $payload = $this->readVinProductGroupRowsPayload($cacheToken, $tecDocVehicleId, $manufacturerId);
+        if ($payload === null) {
+            return [...$empty, 'error' => 'Кэш категорий устарел или недоступен. Проверьте VIN ещё раз.'];
+        }
+        $depth = count($cleanPath) + 1;
+        if ($depth > 4) {
+            return $empty;
+        }
+        $filtered = $this->filterProductGroupRowsByAncestorPath($payload['rows'], $cleanPath);
+        if ($filtered === []) {
+            return $empty;
+        }
+        $nameKey = 'categoryName'.$depth;
+        $idKey = 'categoryId'.$depth;
+        $nextIdKey = $depth < 4 ? 'categoryId'.($depth + 1) : null;
+        $seen = [];
+        foreach ($filtered as $row) {
+            if (! is_array($row) || ! isset($row[$idKey]) || ! is_numeric($row[$idKey]) || (int) $row[$idKey] <= 0) {
+                continue;
+            }
+            $id = (int) $row[$idKey];
+            $nm = trim((string) ($row[$nameKey] ?? ''));
+            if ($nm === '' || isset($seen[$id])) {
+                continue;
+            }
+            $hasChildren = false;
+            if ($nextIdKey !== null) {
+                foreach ($filtered as $r2) {
+                    if (! is_array($r2) || ! isset($r2[$idKey], $r2[$nextIdKey]) || ! is_numeric($r2[$nextIdKey])) {
+                        continue;
+                    }
+                    if ((int) $r2[$idKey] !== $id) {
+                        continue;
+                    }
+                    if ((int) $r2[$nextIdKey] > 0) {
+                        $hasChildren = true;
+                        break;
+                    }
+                }
+            }
+            $seen[$id] = ['id' => $id, 'name' => $nm, 'has_children' => $hasChildren];
+        }
+        $nodes = array_values($seen);
+        usort($nodes, static fn (array $a, array $b): int => strcasecmp((string) ($a['name'] ?? ''), (string) ($b['name'] ?? '')));
+
+        return ['nodes' => $nodes, 'error' => ''];
+    }
+
+    /**
+     * Id группы запчастей для запроса артикулов по полному пути в дереве (лист для этой модификации).
+     *
+     * @param  list<int>  $fullPathSegmentIds
+     */
+    public function resolveVinProductGroupLeafArticleId(
+        string $cacheToken,
+        int $tecDocVehicleId,
+        int $manufacturerId,
+        array $fullPathSegmentIds,
+    ): ?int {
+        $clean = [];
+        foreach ($fullPathSegmentIds as $p) {
+            $i = (int) $p;
+            if ($i <= 0) {
+                return null;
+            }
+            $clean[] = $i;
+            if (count($clean) >= 4) {
+                break;
+            }
+        }
+        if ($clean === []) {
+            return null;
+        }
+        $payload = $this->readVinProductGroupRowsPayload($cacheToken, $tecDocVehicleId, $manufacturerId);
+        if ($payload === null) {
+            return null;
+        }
+        $filtered = $this->filterProductGroupRowsByAncestorPath($payload['rows'], $clean);
+        foreach ($filtered as $row) {
+            if (! is_array($row)) {
+                continue;
+            }
+            $lid = $this->extractRapidApiCategoryLeafId($row);
+            if ($lid !== null && $lid > 0) {
+                return $lid;
+            }
+        }
+        $last = $clean[array_key_last($clean)];
+
+        return $last > 0 ? $last : null;
+    }
+
+    /**
+     * Список артикулов по модификации TecDoc (vehicle-id из {@see listCategoriesByVehicleDescriptor}: поле type_id)
+     * и узлу категории (assembly group / category id из списка категорий).
+     *
+     * Рабочие пути RapidAPI (как в ronhartman/tecdoc-autoparts-catalog {@see https://github.com/ronhartman/tecdoc-autoparts-catalog/blob/dev/src/Api/CatalogApi.php}):
+     * GET /articles/list/vehicle-id/{vehicleId}/product-group-id/{id}/manufacturer-id/{mfr}/lang-id/{lang}/country-filter-id/{country}/type-id/{type}
+     * Плюс запасные варианты без manufacturer и старый формат category-id.
+     *
+     * @return array{
+     *   found: bool,
+     *   articles: list<array{articleId: int|null, articleNo: string, name: string, supplierName: string, imageUrl: string|null, details: list<array{label: string, value: string}>}>,
+     *   message: string
+     * }
+     */
+    public function listArticlesByVehicleAndCategory(int $tecDocVehicleId, int $productGroupId, int $manufacturerId = 0): array
+    {
+        $empty = [
+            'found' => false,
+            'articles' => [],
+            'message' => '',
+        ];
+
+        if ($tecDocVehicleId <= 0 || $productGroupId <= 0) {
+            $empty['message'] = 'Некорректный идентификатор авто или категории.';
+
+            return $empty;
+        }
+
+        if (! $this->isConfigured()) {
+            $empty['message'] = 'Каталог API не настроен.';
+
+            return $empty;
+        }
+
+        $langId = (int) config('services.auto_parts_catalog.lang_id', 16);
+        $typeId = (int) config('services.auto_parts_catalog.vehicle_type_id', 1);
+        $countryId = (int) config('services.auto_parts_catalog.country_filter_id', 63);
+        $limit = max(1, min(100, (int) config('services.auto_parts_catalog.vin_flow_article_list_limit', 48)));
+
+        $candidates = [];
+        if ($manufacturerId > 0) {
+            $candidates[] = "/articles/list/vehicle-id/{$tecDocVehicleId}/product-group-id/{$productGroupId}/manufacturer-id/{$manufacturerId}/lang-id/{$langId}/country-filter-id/{$countryId}/type-id/{$typeId}";
+        }
+        $candidates = array_merge($candidates, [
+            "/articles/list/type-id/{$typeId}/vehicle-id/{$tecDocVehicleId}/category-id/{$productGroupId}/lang-id/{$langId}",
+            "/articles/list/type-id/{$typeId}/vehicle-id/{$tecDocVehicleId}/category-id/{$productGroupId}/lang-id/{$langId}/country-filter-id/{$countryId}",
+            "/articles/list/type-id/{$typeId}/category-id/{$productGroupId}/vehicle-id/{$tecDocVehicleId}/lang-id/{$langId}",
+            "/articles/list?typeId={$typeId}&vehicleId={$tecDocVehicleId}&categoryId={$productGroupId}&langId={$langId}",
+        ]);
+
+        foreach ($candidates as $path) {
+            $raw = $this->tryGetJson($path);
+            if (! is_array($raw)) {
+                continue;
+            }
+            $rows = $this->extractArticleListRows($raw);
+            if ($rows === []) {
+                continue;
+            }
+            $articles = $this->normalizeArticleListRows($rows, $limit);
+            if ($articles !== []) {
+                return [
+                    'found' => true,
+                    'articles' => $articles,
+                    'message' => 'OK',
+                ];
+            }
+        }
+
+        $empty['message'] = 'Артикулы не найдены или маршрут API недоступен.';
+
+        return $empty;
+    }
+
+    /**
+     * @param  array<string,mixed>|list<mixed>  $raw
+     * @return list<array<string,mixed>>
+     */
+    protected function extractArticleListRows(array $raw): array
+    {
+        if (array_is_list($raw)) {
+            return array_values(array_filter($raw, static fn ($r): bool => is_array($r)));
+        }
+
+        foreach (['articles', 'data', 'results', 'items', 'rows', 'list', 'articlesList'] as $key) {
+            $inner = $raw[$key] ?? null;
+            if (is_array($inner) && array_is_list($inner)) {
+                return array_values(array_filter($inner, static fn ($r): bool => is_array($r)));
+            }
+        }
+
+        return [];
+    }
+
+    /**
+     * @param  list<array<string,mixed>>  $rows
+     * @return list<array{articleId: int|null, articleNo: string, name: string, supplierName: string, imageUrl: string|null, details: list<array{label: string, value: string}>}>
+     */
+    protected function normalizeArticleListRows(array $rows, int $limit): array
+    {
+        $out = [];
+        $seen = [];
+        foreach ($rows as $row) {
+            if (count($out) >= $limit) {
+                break;
+            }
+            $articleNo = trim((string) ($row['articleNo'] ?? $row['articleNumber'] ?? $row['articleSearchNo'] ?? ''));
+            $name = trim((string) ($row['articleProductName'] ?? $row['genericArticleDescription'] ?? $row['productName'] ?? $row['name'] ?? ''));
+            $supplier = trim((string) ($row['supplierName'] ?? $row['dataSupplier'] ?? $row['mfrName'] ?? $row['brandName'] ?? ''));
+            $articleId = $this->extractFirstInt($row, ['articleId', 'articleLinkId', 'id']);
+
+            $key = $articleId !== null ? 'id:'.$articleId : 'no:'.mb_strtolower($supplier.'|'.$articleNo);
+            if (($articleNo === '' && $name === '') || isset($seen[$key])) {
+                continue;
+            }
+            $seen[$key] = true;
+            $imageUrl = $this->extractS3ImageUrlFromArticleRow($row);
+            $out[] = [
+                'articleId' => $articleId,
+                'articleNo' => $articleNo,
+                'name' => $name !== '' ? $name : '—',
+                'supplierName' => $supplier !== '' ? $supplier : '—',
+                'imageUrl' => $imageUrl,
+                'details' => $this->buildArticleVinDetailLines($row, $articleId),
+            ];
+        }
+
+        return $out;
+    }
+
+    /**
+     * Плоский слой полей из ответа списка артикулов для вывода «всех» скалярных значений на витрине.
+     *
+     * @param  array<string,mixed>  $row
+     * @return array<string,mixed>
+     */
+    protected function flattenArticleRowForVinDetails(array $row): array
+    {
+        $out = [];
+        foreach ($row as $key => $value) {
+            if (! is_string($key) || $key === '') {
+                continue;
+            }
+            if (is_array($value) && in_array($key, ['article', 'articleData', 'data'], true)) {
+                if (array_is_list($value)) {
+                    continue;
+                }
+                foreach ($value as $innerKey => $innerVal) {
+                    if ((! is_string($innerKey) && ! is_int($innerKey)) || $innerKey === '') {
+                        continue;
+                    }
+                    $ik = (string) $innerKey;
+                    $out[$key.'.'.$ik] = $innerVal;
+                }
+
+                continue;
+            }
+            $out[$key] = $value;
+        }
+
+        return $out;
+    }
+
+    /**
+     * @return list<string>
+     */
+    protected function articleVinDetailKeySuffixSkips(): array
+    {
+        static $skips = null;
+        if ($skips === null) {
+            $skips = [
+                'articleno',
+                'articlenumber',
+                'articlesearchno',
+                'articleproductname',
+                'genericarticledescription',
+                'productname',
+                'name',
+                'suppliername',
+                'datasupplier',
+                'mfrname',
+                'brandname',
+                'articleid',
+                'articlelinkid',
+                's3image',
+                's3_image',
+                'imageurl',
+                'image',
+                'thumbnailurl',
+                'thumburl',
+            ];
+        }
+
+        return $skips;
+    }
+
+    /**
+     * @return array<string, string>
+     */
+    protected function articleVinDetailLabelsLower(): array
+    {
+        static $labels = null;
+        if ($labels === null) {
+            $labels = [
+                'productid' => 'ID продукта',
+                'supplierid' => 'ID поставщика',
+                'datasupplierid' => 'ID поставщика данных',
+                'mfrid' => 'ID производителя',
+                'manufacturerid' => 'ID производителя',
+                'genericarticleid' => 'ID типа детали',
+                'assemblygroupnodeid' => 'ID узла каталога',
+                'legacyarticleid' => 'Legacy ID артикула',
+                'gtin' => 'GTIN',
+                'ean' => 'EAN',
+                'oemno' => 'OEM',
+                'quantityperpackagingunit' => 'Кол-во в упаковке',
+                'quantityunit' => 'Ед. измерения',
+                'packingunit' => 'Упаковка',
+                'isaccessory' => 'Аксессуар',
+                'isfictional' => 'Служебная запись',
+                'isvalid' => 'Действующий',
+                'articlestatusdescription' => 'Статус',
+                'articlestatusid' => 'ID статуса',
+                'articlestatedescription' => 'Состояние',
+                'misc' => 'Примечание',
+                'description' => 'Описание',
+                'additionaldescription' => 'Доп. описание',
+                'info' => 'Информация',
+                'mediafilename' => 'Файл изображения',
+                'mediafileurl' => 'URL медиа',
+                'mediatype' => 'Формат файла',
+                'mediaheight' => 'Высота изображения',
+                'mediawidth' => 'Ширина изображения',
+            ];
+        }
+
+        return $labels;
+    }
+
+    /**
+     * Порядок вывода строк «подробностей» артикула: сначала идентификаторы и логистика, медиа — сгруппировано в конце блока технических полей.
+     *
+     * @return array{rank: int, secondary: int}
+     */
+    protected function articleVinDetailSortMeta(string $fullKey): array
+    {
+        $norm = mb_strtolower($fullKey);
+        $suffix = str_contains($norm, '.')
+            ? mb_strtolower((string) substr($norm, (int) strrpos($norm, '.') + 1))
+            : $norm;
+
+        static $second = null;
+        if ($second === null) {
+            $second = [
+                'productid' => 10,
+                'genericarticleid' => 20,
+                'assemblygroupnodeid' => 30,
+                'legacyarticleid' => 40,
+                'supplierid' => 10,
+                'datasupplierid' => 20,
+                'mfrid' => 30,
+                'manufacturerid' => 40,
+                'gtin' => 10,
+                'ean' => 20,
+                'oemno' => 30,
+                'quantityunit' => 10,
+                'packingunit' => 20,
+                'quantityperpackagingunit' => 30,
+                'mediafilename' => 10,
+                'mediafileurl' => 20,
+                'mediatype' => 30,
+                'mediaheight' => 40,
+                'mediawidth' => 50,
+            ];
+        }
+        $sec = $second[$suffix] ?? 100;
+
+        if ($suffix === 'productid') {
+            return ['rank' => 10, 'secondary' => $sec];
+        }
+        if (in_array($suffix, ['genericarticleid', 'assemblygroupnodeid', 'legacyarticleid'], true)) {
+            return ['rank' => 15, 'secondary' => $sec];
+        }
+        if (in_array($suffix, ['supplierid', 'datasupplierid', 'mfrid', 'manufacturerid'], true)) {
+            return ['rank' => 20, 'secondary' => $sec];
+        }
+        if (in_array($suffix, ['gtin', 'ean', 'oemno'], true)) {
+            return ['rank' => 30, 'secondary' => $sec];
+        }
+        if (in_array($suffix, ['quantityunit', 'packingunit', 'quantityperpackagingunit'], true)) {
+            return ['rank' => 40, 'secondary' => $sec];
+        }
+        if (
+            str_contains($suffix, 'status')
+            || str_contains($suffix, 'articlestate')
+            || (str_starts_with($suffix, 'is') && strlen($suffix) > 2 && ! str_starts_with($suffix, 'iso'))
+        ) {
+            return ['rank' => 50, 'secondary' => $sec];
+        }
+        if (
+            str_contains($suffix, 'description')
+            || $suffix === 'info'
+            || $suffix === 'misc'
+        ) {
+            return ['rank' => 60, 'secondary' => $sec];
+        }
+        if (str_contains($suffix, 'media') || str_contains($norm, '.media')) {
+            return ['rank' => 70, 'secondary' => $sec];
+        }
+
+        return ['rank' => 100, 'secondary' => $sec];
+    }
+
+    protected function resolveArticleVinDetailLabel(string $fullKey): string
+    {
+        $norm = mb_strtolower($fullKey);
+        $labels = $this->articleVinDetailLabelsLower();
+        if (isset($labels[$norm])) {
+            return $labels[$norm];
+        }
+        if (str_contains($norm, '.')) {
+            $suffix = mb_strtolower((string) substr($norm, (int) strrpos($norm, '.') + 1));
+            if (isset($labels[$suffix])) {
+                return $labels[$suffix];
+            }
+        }
+
+        $spaced = (string) preg_replace('/([a-z])([A-Z])/u', '$1 $2', $fullKey);
+
+        return str_replace(['_', '.'], [' ', ' · '], $spaced);
+    }
+
+    /**
+     * @param  array<string,mixed>  $row
+     * @return list<array{label: string, value: string}>
+     */
+    protected function buildArticleVinDetailLines(array $row, ?int $articleId): array
+    {
+        $flat = $this->flattenArticleRowForVinDetails($row);
+        $suffixSkips = $this->articleVinDetailKeySuffixSkips();
+        $seen = [];
+        $lines = [];
+        foreach ($flat as $fullKey => $value) {
+            if (! is_string($fullKey) || $fullKey === '') {
+                continue;
+            }
+            $norm = mb_strtolower($fullKey);
+            $suffix = str_contains($norm, '.') ? mb_strtolower((string) substr($norm, (int) strrpos($norm, '.') + 1)) : $norm;
+            if (in_array($suffix, $suffixSkips, true)) {
+                continue;
+            }
+            if ($norm === 'id' && $articleId !== null && is_scalar($value) && ctype_digit(trim((string) $value)) && (int) $value === $articleId) {
+                continue;
+            }
+            if (is_bool($value)) {
+                $s = $value ? 'да' : 'нет';
+            } elseif (is_int($value) || is_float($value)) {
+                $s = trim((string) $value);
+            } elseif (is_string($value)) {
+                $s = trim($value);
+            } else {
+                continue;
+            }
+            if ($s === '') {
+                continue;
+            }
+            if (mb_strlen($s) > 500) {
+                $s = mb_substr($s, 0, 497).'…';
+            }
+            $label = $this->resolveArticleVinDetailLabel($fullKey);
+            $sig = $label."\0".$s;
+            if (isset($seen[$sig])) {
+                continue;
+            }
+            $seen[$sig] = true;
+            $meta = $this->articleVinDetailSortMeta($fullKey);
+            $lines[] = [
+                'label' => $label,
+                'value' => $s,
+                '_rank' => $meta['rank'],
+                '_sec' => $meta['secondary'],
+            ];
+        }
+
+        usort(
+            $lines,
+            static function (array $a, array $b): int {
+                if ($a['_rank'] !== $b['_rank']) {
+                    return $a['_rank'] <=> $b['_rank'];
+                }
+                if ($a['_sec'] !== $b['_sec']) {
+                    return $a['_sec'] <=> $b['_sec'];
+                }
+
+                return strcasecmp($a['label'], $b['label']);
+            }
+        );
+
+        $trimmed = array_slice($lines, 0, 48);
+
+        return array_values(array_map(
+            static fn (array $x): array => ['label' => $x['label'], 'value' => $x['value']],
+            $trimmed
+        ));
     }
 
     /** @return list<array<string,mixed>> */
     protected function fetchManufacturerRows(int $langId, int $vehicleTypeId): array
     {
+        $countryId = (int) config('services.auto_parts_catalog.country_filter_id', 63);
         $candidates = [
+            "/manufacturers/list/lang-id/{$langId}/country-filter-id/{$countryId}/type-id/{$vehicleTypeId}",
+            "/manufacturers/list/type-id/{$vehicleTypeId}",
+            "/manufacturers/list/type-id/{$vehicleTypeId}/lang-id/{$langId}",
+            "/manufacturers/list?typeId={$vehicleTypeId}&langId={$langId}",
             "/manufacturers/list?langId={$langId}",
             "/manufacturers/list-by-type/lang-id/{$langId}/type-id/{$vehicleTypeId}",
             "/manufacturers/list-by-type/type-id/{$vehicleTypeId}/lang-id/{$langId}",
@@ -1220,9 +1915,12 @@ class AutoPartsCatalogService
     }
 
     /** @return list<array<string,mixed>> */
-    protected function fetchModelRows(int $manufacturerId, int $langId): array
+    protected function fetchModelRows(int $manufacturerId, int $langId, int $vehicleTypeId, int $countryId): array
     {
         $candidates = [
+            "/models/list/manufacturer-id/{$manufacturerId}/lang-id/{$langId}/country-filter-id/{$countryId}/type-id/{$vehicleTypeId}",
+            "/models/list/type-id/{$vehicleTypeId}/manufacturer-id/{$manufacturerId}/lang-id/{$langId}/country-filter-id/{$countryId}",
+            "/models/list/type-id/{$vehicleTypeId}/manufacturer-id/{$manufacturerId}/lang-id/{$langId}",
             "/models/list-by-manufacturer-id/manufacturer-id/{$manufacturerId}/lang-id/{$langId}",
             "/models/list-by-manufacturer/manufacturer-id/{$manufacturerId}/lang-id/{$langId}",
             "/models/list?manufacturerId={$manufacturerId}&langId={$langId}",
@@ -1232,28 +1930,188 @@ class AutoPartsCatalogService
     }
 
     /** @return list<array<string,mixed>> */
-    protected function fetchVehicleTypeRows(int $modelId, int $langId, int $countryId): array
+    protected function fetchVehicleTypeRows(int $modelId, int $manufacturerId, int $langId, int $countryId, int $vehicleTypeId): array
     {
         $candidates = [
+            "/types/list-vehicles-types/{$modelId}/manufacturer-id/{$manufacturerId}/lang-id/{$langId}/country-filter-id/{$countryId}/type-id/{$vehicleTypeId}",
+            "/types/type-id/{$vehicleTypeId}/list-vehicles-types/{$modelId}/lang-id/{$langId}/country-filter-id/{$countryId}",
+            "/types/type-id/{$vehicleTypeId}/list-vehicles-types/{$modelId}/lang-id/{$langId}",
+            "/types/type-id/{$vehicleTypeId}/list-vehicles-id/{$modelId}/lang-id/{$langId}/country-filter-id/{$countryId}",
+            "/types/type-id/{$vehicleTypeId}/list-vehicles-id/{$modelId}/lang-id/{$langId}",
             "/types/list-by-model-id/model-id/{$modelId}/lang-id/{$langId}",
             "/types/list-by-model-id/model-id/{$modelId}/lang-id/{$langId}/country-filter-id/{$countryId}",
             "/types/list?modelId={$modelId}&langId={$langId}",
+            "/types/list?model-id={$modelId}&lang-id={$langId}",
         ];
 
-        return $this->firstListFromCandidatePaths($candidates);
+        foreach ($candidates as $path) {
+            $raw = $this->tryGetJson($path);
+            if (! is_array($raw)) {
+                continue;
+            }
+            $rows = $this->extractListRows($raw);
+            if ($rows === []) {
+                $rows = $this->extractNestedListRowsFromJson($raw);
+            }
+            if ($rows !== []) {
+                return $rows;
+            }
+        }
+
+        return [];
     }
 
-    /** @return list<array<string,mixed>> */
-    protected function fetchCategoryRows(int $vehicleTypeId, int $langId): array
+    /**
+     * Некоторые ответы RapidAPI кладут массив записей во вложенный объект (не в data/results).
+     *
+     * @param  array<string,mixed>  $raw
+     * @return list<array<string,mixed>>
+     */
+    protected function extractNestedListRowsFromJson(array $raw): array
     {
+        $direct = $this->extractListRows($raw);
+        if ($direct !== []) {
+            return $direct;
+        }
+
+        foreach ($raw as $v) {
+            if (! is_array($v)) {
+                continue;
+            }
+            if (array_is_list($v)) {
+                $inner = array_values(array_filter($v, static fn ($r): bool => is_array($r)));
+                if ($inner !== []) {
+                    return $inner;
+                }
+            } else {
+                $inner = $this->extractListRows($v);
+                if ($inner !== []) {
+                    return $inner;
+                }
+                $deep = $this->extractNestedListRowsFromJson($v);
+                if ($deep !== []) {
+                    return $deep;
+                }
+            }
+        }
+
+        return [];
+    }
+
+    /**
+     * Категории/группы запчастей по модификации (vehicleId = carId в TecDoc).
+     * Рабочий формат RapidAPI — как в демо {@see https://github.com/ronhartman/tecdoc-autoparts-catalog/blob/dev/src/Api/CatalogApi.php}:
+     * /category/category-products-groups-variant-N/{vehicleId}/manufacturer-id/{manufacturerId}/lang-id/.../country-filter-id/.../type-id/...
+     * Дополнительно — варианты из OpenAPI/старые /categories/...
+     *
+     * @param  list<array<string, mixed>>  $httpAttempts  при $recordHttp — сюда дописывается сводка по каждому GET
+     * @return list<array<string,mixed>>
+     */
+    protected function fetchCategoryRows(
+        int $tecDocCarId,
+        int $manufacturerId,
+        int $langId,
+        int $countryId,
+        int $vehicleClassTypeId,
+        array &$httpAttempts = [],
+        bool $recordHttp = false,
+    ): array {
         $candidates = [
-            "/categories/list-by-type-id/type-id/{$vehicleTypeId}/lang-id/{$langId}",
-            "/categories/list-by-type-id/lang-id/{$langId}/type-id/{$vehicleTypeId}",
-            "/categories/list?typeId={$vehicleTypeId}&langId={$langId}",
-            "/categories/list?type-id={$vehicleTypeId}&langId={$langId}",
+            "/category/type-id/{$vehicleClassTypeId}/products-groups-variant-1/{$tecDocCarId}/lang-id/{$langId}",
+            "/category/type-id/{$vehicleClassTypeId}/products-groups-variant-2/{$tecDocCarId}/lang-id/{$langId}",
+            "/category/type-id/{$vehicleClassTypeId}/products-groups-variant-3/{$tecDocCarId}/lang-id/{$langId}",
+            "/category/type-id/{$vehicleClassTypeId}/products-groups-variant-1/{$tecDocCarId}/lang-id/{$langId}/country-filter-id/{$countryId}",
+            "/category/type-id/{$vehicleClassTypeId}/products-groups-variant-2/{$tecDocCarId}/lang-id/{$langId}/country-filter-id/{$countryId}",
+            "/category/type-id/{$vehicleClassTypeId}/products-groups-variant-3/{$tecDocCarId}/lang-id/{$langId}/country-filter-id/{$countryId}",
+            "/category/category-products-groups-variant-1/{$tecDocCarId}/manufacturer-id/{$manufacturerId}/lang-id/{$langId}/country-filter-id/{$countryId}/type-id/{$vehicleClassTypeId}",
+            "/category/category-products-groups-variant-2/{$tecDocCarId}/manufacturer-id/{$manufacturerId}/lang-id/{$langId}/country-filter-id/{$countryId}/type-id/{$vehicleClassTypeId}",
+            "/category/category-products-groups-variant-3/{$tecDocCarId}/manufacturer-id/{$manufacturerId}/lang-id/{$langId}/country-filter-id/{$countryId}/type-id/{$vehicleClassTypeId}",
+            "/categories/list-by-type-id/type-id/{$tecDocCarId}/lang-id/{$langId}",
+            "/categories/list-by-type-id/lang-id/{$langId}/type-id/{$tecDocCarId}",
+            "/categories/list?typeId={$tecDocCarId}&langId={$langId}",
+            "/categories/list?type-id={$tecDocCarId}&langId={$langId}",
         ];
 
-        return $this->firstListFromCandidatePaths($candidates);
+        foreach ($candidates as $path) {
+            $response = $this->catalogHttpGet($path);
+            $probe = [
+                'path' => $path,
+                'status' => null,
+                'ok' => false,
+                'json_top_keys' => [],
+                'rows_after_extract' => 0,
+                'body_preview' => '',
+                'error' => null,
+            ];
+            if ($response === null) {
+                $probe['error'] = 'request_exception_or_unconfigured';
+                if ($recordHttp) {
+                    $httpAttempts[] = $probe;
+                }
+
+                continue;
+            }
+            $probe['status'] = $response->status();
+            $probe['ok'] = $response->successful();
+            $probe['body_preview'] = Str::limit((string) $response->body(), 700);
+            if (! $response->successful()) {
+                if ($recordHttp) {
+                    $httpAttempts[] = $probe;
+                }
+
+                continue;
+            }
+            $json = $response->json();
+            if (! is_array($json)) {
+                $probe['error'] = 'json_not_array';
+                if ($recordHttp) {
+                    $httpAttempts[] = $probe;
+                }
+
+                continue;
+            }
+            $probe['json_top_keys'] = array_slice(array_keys($json), 0, 40);
+            $rows = $this->extractCategoryResponseRows($json);
+            $probe['rows_after_extract'] = count($rows);
+            if ($recordHttp) {
+                $httpAttempts[] = $probe;
+            }
+            if ($rows !== []) {
+                return $rows;
+            }
+        }
+
+        return [];
+    }
+
+    /**
+     * Разворачивает дерево категорий (children / nodes) в плоский список строк.
+     *
+     * @param  list<array<string,mixed>>  $rows
+     * @return list<array<string,mixed>>
+     */
+    protected function flattenCategoryTreeRows(array $rows): array
+    {
+        $out = [];
+        $walk = function (array $row) use (&$out, &$walk): void {
+            $out[] = $row;
+            foreach (['children', 'childs', 'childNodes', 'nodes', 'subCategories', 'subGroups', 'assemblyGroupChildren'] as $nestKey) {
+                $ch = $row[$nestKey] ?? null;
+                if (! is_array($ch)) {
+                    continue;
+                }
+                foreach ($ch as $c) {
+                    if (is_array($c)) {
+                        $walk($c);
+                    }
+                }
+            }
+        };
+        foreach ($rows as $r) {
+            $walk($r);
+        }
+
+        return $out;
     }
 
     /**
@@ -1286,10 +2144,119 @@ class AutoPartsCatalogService
             return array_values(array_filter($raw, static fn ($r): bool => is_array($r)));
         }
 
-        foreach (['data', 'results', 'items', 'rows', 'list', 'models', 'manufacturers', 'types', 'categories'] as $key) {
+        foreach (['data', 'results', 'items', 'rows', 'list', 'array', 'values', 'content', 'models', 'manufacturers', 'types', 'categories', 'productGroups', 'assemblyGroups', 'vehicles', 'vehicleTypes', 'vehicleList', 'carTypes'] as $key) {
             $inner = $raw[$key] ?? null;
-            if (is_array($inner) && array_is_list($inner)) {
+            if (! is_array($inner)) {
+                continue;
+            }
+            if (array_is_list($inner)) {
                 return array_values(array_filter($inner, static fn ($r): bool => is_array($r)));
+            }
+            $coerced = $this->coerceAssocMapToListOfArrays($inner);
+            if ($coerced !== []) {
+                return $coerced;
+            }
+        }
+
+        return [];
+    }
+
+    /**
+     * TecDoc / RapidAPI иногда отдаёт map (объект) id → запись вместо JSON-массива.
+     * Берём как список только если **каждое** значение верхнего уровня — массив (однородные узлы).
+     *
+     * @param  array<mixed>  $map
+     * @return list<array<string,mixed>>
+     */
+    protected function coerceAssocMapToListOfArrays(array $map): array
+    {
+        if ($map === [] || array_is_list($map)) {
+            return [];
+        }
+        $out = [];
+        foreach ($map as $v) {
+            if (! is_array($v)) {
+                return [];
+            }
+            $out[] = $v;
+        }
+
+        return $out;
+    }
+
+    /**
+     * Уникальные id модификации для запроса категорий (разные поля в разных ответах /types).
+     *
+     * @param  list<array<string,mixed>>  $vehicleTypeRows
+     * @return list<int>
+     */
+    protected function collectTecdocVehicleIdCandidates(array $vehicleTypeRows, int $primaryId): array
+    {
+        $seen = [];
+        $out = [];
+        $push = function (int $id) use (&$seen, &$out): void {
+            if ($id <= 0 || isset($seen[$id])) {
+                return;
+            }
+            $seen[$id] = true;
+            $out[] = $id;
+        };
+        $push($primaryId);
+        $keys = ['carId', 'vehicleId', 'linkageTargetId', 'linkageId', 'linkedVehicleId'];
+        foreach ($vehicleTypeRows as $row) {
+            if (! is_array($row)) {
+                continue;
+            }
+            foreach ($keys as $k) {
+                if (isset($row[$k]) && is_numeric($row[$k])) {
+                    $push((int) $row[$k]);
+                }
+            }
+        }
+
+        return array_slice($out, 0, 18);
+    }
+
+    /**
+     * Извлечение списка категорий из «нестандартных» обёрток ответа RapidAPI.
+     *
+     * @param  array<string,mixed>  $raw
+     * @return list<array<string,mixed>>
+     */
+    protected function extractCategoryResponseRows(array $raw): array
+    {
+        $direct = $this->extractListRows($raw);
+        if ($direct !== []) {
+            return $direct;
+        }
+        $nested = $this->extractNestedListRowsFromJson($raw);
+        if ($nested !== []) {
+            return $nested;
+        }
+
+        foreach (['categories', 'productGroups', 'assemblyGroups', 'assemblyGroupFacets', 'commodityGroups', 'genericArticles'] as $key) {
+            $inner = $raw[$key] ?? null;
+            if (! is_array($inner)) {
+                continue;
+            }
+            if (array_is_list($inner)) {
+                $list = array_values(array_filter($inner, static fn ($r): bool => is_array($r)));
+                if ($list !== []) {
+                    return $list;
+                }
+            } else {
+                $coerced = $this->coerceAssocMapToListOfArrays($inner);
+                if ($coerced !== []) {
+                    return $coerced;
+                }
+            }
+        }
+
+        $data = $raw['data'] ?? null;
+        if (is_array($data) && $data !== []) {
+            $inner = $this->extractCategoryResponseRows($data);
+            if ($inner !== []) {
+                return $inner;
             }
         }
 
@@ -1299,32 +2266,89 @@ class AutoPartsCatalogService
     /** @param list<array<string,mixed>> $rows */
     protected function pickManufacturerId(array $rows, string $make): ?int
     {
-        $needle = $this->normalizeName($make);
+        $needles = $this->catalogMakeNeedles($make);
         $fallback = null;
+        $bestSimilarId = null;
+        $bestSimilarScore = 0.0;
         foreach ($rows as $row) {
-            $name = $this->normalizeName((string) ($row['manufacturerName'] ?? $row['name'] ?? $row['brand'] ?? ''));
-            $id = $this->extractFirstInt($row, ['manufacturerId', 'id', 'brandId']);
+            $rawName = (string) ($row['manufacturerName'] ?? $row['name'] ?? $row['brand'] ?? $row['shortName'] ?? $row['label'] ?? $row['manufacturer'] ?? '');
+            $name = $this->normalizeName($rawName);
+            $id = $this->extractFirstInt($row, ['manufacturerId', 'mfrId', 'id', 'brandId', 'manufacturerID']);
             if ($name === '' || $id === null) {
                 continue;
             }
-            if ($name === $needle) {
-                return $id;
-            }
-            if ($fallback === null && (str_contains($name, $needle) || str_contains($needle, $name))) {
-                $fallback = $id;
+            foreach ($needles as $needle) {
+                if ($needle === '') {
+                    continue;
+                }
+                if ($name === $needle) {
+                    return $id;
+                }
+                if ($fallback === null && (str_contains($name, $needle) || str_contains($needle, $name))) {
+                    $fallback = $id;
+                }
+                if (strlen($needle) >= 3 && strlen($name) >= 3) {
+                    similar_text($needle, $name, $pct);
+                    if ($pct > $bestSimilarScore && $pct >= 38.0) {
+                        $bestSimilarScore = $pct;
+                        $bestSimilarId = $id;
+                    }
+                }
             }
         }
 
-        return $fallback;
+        return $fallback ?? $bestSimilarId;
+    }
+
+    /**
+     * Варианты нормализованной марки для сопоставления с TecDoc (VIN часто даёт краткое имя).
+     *
+     * @return list<string>
+     */
+    protected function catalogMakeNeedles(string $make): array
+    {
+        $primary = $this->normalizeName($make);
+        $out = [];
+        $push = function (string $s) use (&$out): void {
+            $s = trim($s);
+            if ($s !== '' && ! in_array($s, $out, true)) {
+                $out[] = $s;
+            }
+        };
+        $push($primary);
+        $aliases = [
+            'vw' => ['volkswagen'],
+            'mercedes' => ['mercedes', 'mercedes benz'],
+            'mercedes-benz' => ['mercedes', 'mercedes benz'],
+            'renault' => ['renault', 'r vehicles'],
+            'opel' => ['opel', 'vauxhall'],
+            'citroen' => ['citroen', 'citroën'],
+            'peugeot' => ['peugeot'],
+            'fiat' => ['fiat'],
+            'skoda' => ['skoda', 'škoda'],
+        ];
+        $lower = mb_strtolower(trim($make));
+        foreach ($aliases as $short => $extras) {
+            if ($lower === $short || str_contains($lower, $short)) {
+                foreach ($extras as $ex) {
+                    $push($this->normalizeName($ex));
+                }
+            }
+        }
+        if (str_contains($primary, ' ')) {
+            $push($this->normalizeName(explode(' ', $primary, 2)[0]));
+        }
+
+        return $out;
     }
 
     /** @param list<array<string,mixed>> $rows */
     protected function pickModelId(array $rows, string $model, ?int $year): ?int
     {
         $needle = $this->normalizeName($model);
-        $bestId = null;
+        $nameMatchWithoutYear = null;
         foreach ($rows as $row) {
-            $name = $this->normalizeName((string) ($row['modelName'] ?? $row['name'] ?? ''));
+            $name = $this->normalizeName((string) ($row['modelName'] ?? $row['modelname'] ?? $row['name'] ?? ''));
             $id = $this->extractFirstInt($row, ['modelId', 'id']);
             if ($name === '' || $id === null) {
                 continue;
@@ -1332,36 +2356,177 @@ class AutoPartsCatalogService
             if (! (str_contains($name, $needle) || str_contains($needle, $name))) {
                 continue;
             }
-            if ($year !== null && ! $this->rowMatchesYear($row, $year)) {
-                continue;
+            $nameMatchWithoutYear = $id;
+            if ($year === null || $this->rowMatchesYear($row, $year)) {
+                return $id;
             }
-
-            return $id;
         }
 
-        return $bestId;
+        return $nameMatchWithoutYear;
     }
 
     /** @param list<array<string,mixed>> $rows */
     protected function pickVehicleTypeId(array $rows, ?int $year): ?int
     {
+        // typeId в ответе часто = класс ТС (легковые), а не id модификации — только после carId/vehicleId.
+        $idKeys = [
+            'carId', 'vehicleId', 'linkageTargetId', 'linkageId', 'linkedVehicleId', 'id', 'typeId',
+        ];
         $fallback = null;
+        $bestDistance = PHP_INT_MAX;
+        $bestId = null;
         foreach ($rows as $row) {
-            $id = $this->extractFirstInt($row, ['carId', 'typeId', 'vehicleId', 'id']);
+            $id = $this->extractFirstInt($row, $idKeys);
             if ($id === null) {
                 continue;
             }
-            if ($year !== null && ! $this->rowMatchesYear($row, $year)) {
-                if ($fallback === null) {
-                    $fallback = $id;
-                }
-                continue;
+            if ($fallback === null) {
+                $fallback = $id;
             }
-
-            return $id;
+            if ($year === null || $this->rowMatchesYear($row, $year)) {
+                return $id;
+            }
+            $dist = $this->vehicleRowYearDistance($row, $year);
+            if ($dist !== null && $dist < $bestDistance) {
+                $bestDistance = $dist;
+                $bestId = $id;
+            }
         }
 
-        return $fallback;
+        return $bestId ?? $fallback;
+    }
+
+    /**
+     * Расстояние года до ближайшей границы интервала выпуска (для выбора «самой близкой» модификации).
+     */
+    protected function vehicleRowYearDistance(array $row, int $year): ?int
+    {
+        [$from, $to] = $this->extractVehicleYearBounds($row);
+        if ($from === null && $to === null) {
+            return null;
+        }
+        $from = $from ?? 1900;
+        $to = $to ?? (int) date('Y') + 1;
+        if ($year < $from) {
+            return $from - $year;
+        }
+        if ($year > $to) {
+            return $year - $to;
+        }
+
+        return 0;
+    }
+
+    /**
+     * Границы года выпуска строки TecDoc (числа и строки вида YYYYMM / YYYY-MM).
+     *
+     * @return array{0: ?int, 1: ?int}
+     */
+    protected function extractVehicleYearBounds(array $row): array
+    {
+        $from = $this->yearFromMixed($row['yearFrom'] ?? $row['modelYearFrom'] ?? $row['constructionIntervalYearFrom'] ?? null);
+        $to = $this->yearFromMixed($row['yearTo'] ?? $row['modelYearTo'] ?? $row['constructionIntervalYearTo'] ?? null);
+
+        $cf = $row['constructionIntervalFrom'] ?? $row['constructionTimeFrom'] ?? $row['dateFrom'] ?? null;
+        $ct = $row['constructionIntervalTo'] ?? $row['constructionTimeTo'] ?? $row['dateTo'] ?? null;
+        if ($from === null) {
+            $from = $this->yearFromTecdocBoundaryString($cf);
+        }
+        if ($to === null) {
+            $to = $this->yearFromTecdocBoundaryString($ct);
+        }
+
+        return [$from, $to];
+    }
+
+    protected function yearFromMixed(mixed $v): ?int
+    {
+        if ($v === null || $v === '') {
+            return null;
+        }
+        if (is_int($v)) {
+            return $v >= 1800 && $v <= 2100 ? $v : null;
+        }
+        if (is_float($v)) {
+            $i = (int) round($v);
+
+            return $i >= 1800 && $i <= 2100 ? $i : null;
+        }
+        if (is_string($v)) {
+            return $this->yearFromTecdocBoundaryString($v);
+        }
+
+        return null;
+    }
+
+    /**
+     * @param  mixed  $v
+     */
+    protected function yearFromTecdocBoundaryString($v): ?int
+    {
+        if (! is_string($v)) {
+            return null;
+        }
+        $t = trim($v);
+        if ($t === '') {
+            return null;
+        }
+        if (preg_match('/^(\d{4})-(\d{2})/', $t, $m)) {
+            return (int) $m[1];
+        }
+        if (preg_match('/^(\d{4})(\d{2})(\d{2})$/', $t, $m)) {
+            return (int) $m[1];
+        }
+        if (preg_match('/^(\d{6})$/', $t, $m)) {
+            return (int) substr($m[1], 0, 4);
+        }
+        if (preg_match('/^(\d{4})$/', $t, $m)) {
+            return (int) $m[1];
+        }
+        if (is_numeric($t)) {
+            $n = (int) $t;
+            if ($n >= 180001 && $n <= 21001231) {
+                return (int) substr((string) $n, 0, 4);
+            }
+            if ($n >= 1800 && $n <= 2100) {
+                return $n;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Цепочка имён из ответа RapidAPI «products-groups» (categoryName1…4).
+     */
+    protected function rapidApiCategoryTreeDisplayName(array $row): string
+    {
+        $parts = [];
+        foreach (['categoryName1', 'categoryName2', 'categoryName3', 'categoryName4'] as $k) {
+            $v = trim((string) ($row[$k] ?? ''));
+            if ($v !== '') {
+                $parts[] = $v;
+            }
+        }
+
+        return trim(implode(' > ', $parts));
+    }
+
+    /**
+     * Id «листа» дерева: самый глубокий уровень, где заданы и имя, и categoryIdN (для запроса артикулов).
+     */
+    protected function extractRapidApiCategoryLeafId(array $row): ?int
+    {
+        for ($i = 4; $i >= 1; $i--) {
+            $nk = 'categoryName'.$i;
+            $ik = 'categoryId'.$i;
+            if (isset($row[$nk]) && trim((string) $row[$nk]) !== ''
+                && isset($row[$ik]) && is_numeric($row[$ik]) && (int) $row[$ik] > 0) {
+                return (int) $row[$ik];
+            }
+        }
+
+        return $this->extractFirstInt($row, ['categoryId1', 'categoryId2', 'categoryId3', 'categoryId4', 'assemblyGroupNodeId', 'productGroupId', 'categoryId', 'id']);
     }
 
     /** @param list<array<string,mixed>> $rows */
@@ -1370,11 +2535,17 @@ class AutoPartsCatalogService
         $out = [];
         $seen = [];
         foreach ($rows as $row) {
-            $name = trim((string) ($row['assemblyGroupName'] ?? $row['categoryName'] ?? $row['name'] ?? $row['description'] ?? ''));
+            $name = trim((string) ($row['assemblyGroupName'] ?? $row['categoryName'] ?? $row['productGroupName'] ?? $row['genericArticleName'] ?? $row['groupName'] ?? $row['strName'] ?? $row['name'] ?? $row['heading'] ?? $row['description'] ?? $row['text'] ?? $row['designation'] ?? $row['langName'] ?? $row['engName'] ?? ''));
+            if ($name === '') {
+                $name = $this->rapidApiCategoryTreeDisplayName($row);
+            }
+            $id = $this->extractFirstInt($row, ['assemblyGroupNodeId', 'productGroupId', 'categoryId', 'genericArticleId', 'id', 'nodeId']);
+            if ($id === null) {
+                $id = $this->extractRapidApiCategoryLeafId($row);
+            }
             if ($name === '') {
                 continue;
             }
-            $id = $this->extractFirstInt($row, ['assemblyGroupNodeId', 'categoryId', 'id']);
             $key = mb_strtolower($name).'#'.($id ?? 0);
             if (isset($seen[$key])) {
                 continue;
@@ -1386,6 +2557,118 @@ class AutoPartsCatalogService
         usort($out, static fn (array $a, array $b): int => strcasecmp($a['name'], $b['name']));
 
         return $out;
+    }
+
+    /**
+     * Дерево категорий для пошагового UI (формат RapidAPI products-groups: categoryName1…4 / categoryId1…4).
+     *
+     * @param  list<array<string,mixed>>  $rows
+     * @return list<array{id:int,name:string,children:list<int,array<string,mixed>>,article_category_id:int|null}>
+     */
+    protected function buildCategoryNavigationTreeFromProductGroupRows(array $rows): array
+    {
+        $forest = [];
+
+        foreach ($rows as $row) {
+            if (! is_array($row) || ! isset($row['categoryName1'], $row['categoryId1'])) {
+                continue;
+            }
+
+            $segments = $this->extractRapidApiCategorySegments($row);
+            if ($segments === []) {
+                continue;
+            }
+
+            $leafArticleId = $this->extractRapidApiCategoryLeafId($row);
+            if ($leafArticleId === null || $leafArticleId <= 0) {
+                $leafArticleId = $segments[count($segments) - 1]['id'];
+            }
+
+            $this->mergeRapidApiCategoryPathIntoAssocForest($forest, $segments, $leafArticleId);
+        }
+
+        return $this->finalizeRapidApiCategoryForest($forest);
+    }
+
+    /**
+     * @param  array<string,mixed>  $row
+     * @return list<array{id:int,name:string}>
+     */
+    protected function extractRapidApiCategorySegments(array $row): array
+    {
+        $depth = (int) ($row['level'] ?? 0);
+        if ($depth < 1) {
+            $depth = 0;
+            for ($j = 1; $j <= 4; $j++) {
+                if (trim((string) ($row['categoryName'.$j] ?? '')) !== '') {
+                    $depth = $j;
+                }
+            }
+        }
+
+        $limit = $depth > 0 ? min(4, $depth) : 4;
+        $segments = [];
+        for ($i = 1; $i <= $limit; $i++) {
+            $name = trim((string) ($row['categoryName'.$i] ?? ''));
+            $id = isset($row['categoryId'.$i]) && is_numeric($row['categoryId'.$i]) ? (int) $row['categoryId'.$i] : 0;
+            if ($name === '' || $id <= 0) {
+                break;
+            }
+            $segments[] = ['id' => $id, 'name' => $name];
+        }
+
+        return $segments;
+    }
+
+    /**
+     * @param  array<int, array<string,mixed>>  $forest
+     * @param  list<array{id:int,name:string}>  $segments
+     */
+    protected function mergeRapidApiCategoryPathIntoAssocForest(array &$forest, array $segments, int $terminalLeafArticleId): void
+    {
+        $current =& $forest;
+        $lastIdx = count($segments) - 1;
+
+        foreach ($segments as $idx => $seg) {
+            $sid = $seg['id'];
+            if (! isset($current[$sid])) {
+                $current[$sid] = [
+                    'id' => $sid,
+                    'name' => $seg['name'],
+                    '_children' => [],
+                    'article_category_id' => null,
+                ];
+            }
+            if ($idx === $lastIdx) {
+                $current[$sid]['article_category_id'] = $terminalLeafArticleId;
+            }
+            $current =& $current[$sid]['_children'];
+        }
+    }
+
+    /**
+     * @param  array<int, array<string,mixed>>  $assocForest
+     * @return list<array{id:int,name:string,children:list<int,array<string,mixed>>,article_category_id:int|null}>
+     */
+    protected function finalizeRapidApiCategoryForest(array $assocForest): array
+    {
+        $nodes = [];
+        foreach ($assocForest as $node) {
+            if (! is_array($node)) {
+                continue;
+            }
+            $chAssoc = $node['_children'] ?? [];
+            unset($node['_children']);
+            $node['children'] = $this->finalizeRapidApiCategoryForest(is_array($chAssoc) ? $chAssoc : []);
+            $acid = $node['article_category_id'] ?? null;
+            if (($acid === null || (int) $acid <= 0) && $node['children'] === []) {
+                $node['article_category_id'] = (int) ($node['id'] ?? 0) > 0 ? (int) $node['id'] : null;
+            }
+            $nodes[] = $node;
+        }
+        usort($nodes, static fn (array $a, array $b): int => strcasecmp((string) ($a['name'] ?? ''), (string) ($b['name'] ?? '')));
+
+        return $nodes;
     }
 
     /** @param array<string,mixed> $row @param list<string> $keys */
@@ -1403,8 +2686,7 @@ class AutoPartsCatalogService
     /** @param array<string,mixed> $row */
     protected function rowMatchesYear(array $row, int $year): bool
     {
-        $from = $this->extractFirstInt($row, ['yearFrom', 'modelYearFrom', 'constructionIntervalYearFrom']);
-        $to = $this->extractFirstInt($row, ['yearTo', 'modelYearTo', 'constructionIntervalYearTo']);
+        [$from, $to] = $this->extractVehicleYearBounds($row);
         if ($from === null && $to === null) {
             return true;
         }
@@ -1453,9 +2735,9 @@ class AutoPartsCatalogService
     }
 
     /**
-     * GET к каталогу без исключения при 404/ошибке сети (для перебора вариантов путей).
+     * GET к каталогу; ответ возвращается и при 4xx/5xx (для диагностики).
      */
-    protected function tryGetJson(string $pathOrQuery): ?array
+    protected function catalogHttpGet(string $pathOrQuery): ?Response
     {
         if (! $this->isConfigured()) {
             return null;
@@ -1476,21 +2758,30 @@ class AutoPartsCatalogService
             if ($tls !== []) {
                 $req = $req->withOptions($tls);
             }
-            $response = $req->get($url);
-            if (! $response->successful()) {
-                return null;
-            }
-            $json = $response->json();
 
-            return is_array($json) ? $json : null;
+            return $req->get($url);
         } catch (\Throwable $e) {
-            Log::debug('auto_parts_catalog_try_get_json', [
+            Log::debug('auto_parts_catalog_http_get', [
                 'path' => $pathOrQuery,
                 'message' => $e->getMessage(),
             ]);
 
             return null;
         }
+    }
+
+    /**
+     * GET к каталогу без исключения при 404/ошибке сети (для перебора вариантов путей).
+     */
+    protected function tryGetJson(string $pathOrQuery): ?array
+    {
+        $response = $this->catalogHttpGet($pathOrQuery);
+        if ($response === null || ! $response->successful()) {
+            return null;
+        }
+        $json = $response->json();
+
+        return is_array($json) ? $json : null;
     }
 
     /**

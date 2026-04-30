@@ -38,7 +38,35 @@ class HomePartFinder extends Component
     /** @var list<array{name:string,id:int|null}> */
     public array $vinCategories = [];
 
+    /** Токен кэша сырых строк каталога по модификации (подкатегории считаются при клике). */
+    public ?string $vinCategoryRowsCacheToken = null;
+
+    /**
+     * Карточки текущего уровня (корень или подкатегории выбранной ветки для этой машины).
+     *
+     * @var list<array{id:int,name:string,has_children:bool}>
+     */
+    public array $vinCategoryCurrentNodes = [];
+
+    /** @var list<array{id:int,name:string}> */
+    public array $vinCategoryPath = [];
+
     public string $vinCategoriesMessage = '';
+
+    public string $vinCategoryNavMessage = '';
+
+    /** TecDoc car / modification id (поле type_id из listCategoriesByVehicleDescriptor). */
+    public ?int $vinCatalogVehicleId = null;
+
+    /** TecDoc manufacturerId для категорий/артикулов RapidAPI (поле manufacturer_id из listCategoriesByVehicleDescriptor). */
+    public ?int $vinCatalogManufacturerId = null;
+
+    public ?int $vinSelectedCatalogCategoryId = null;
+
+    /** @var list<array{articleId: int|null, articleNo: string, name: string, supplierName: string, imageUrl: string|null, details: list<array{label: string, value: string}>}> */
+    public array $vinCatalogArticles = [];
+
+    public string $vinCatalogArticlesMessage = '';
 
     protected $queryString = [
         'vehicleMake' => ['except' => ''],
@@ -311,6 +339,12 @@ class HomePartFinder extends Component
 
         $this->vin = trim((string) $validated['vin']);
 
+        $this->vinCatalogVehicleId = null;
+        $this->vinCatalogManufacturerId = null;
+        $this->vinSelectedCatalogCategoryId = null;
+        $this->vinCatalogArticles = [];
+        $this->vinCatalogArticlesMessage = '';
+
         /** @var VinDecoderService $decoder */
         $decoder = app(VinDecoderService::class);
         $decoded = $decoder->decode($this->vin);
@@ -320,7 +354,11 @@ class HomePartFinder extends Component
         $this->vinDecodeMessage = (string) ($decoded['message'] ?? '');
 
         $this->vinCategories = [];
+        $this->vinCategoryRowsCacheToken = null;
+        $this->vinCategoryCurrentNodes = [];
+        $this->vinCategoryPath = [];
         $this->vinCategoriesMessage = '';
+        $this->vinCategoryNavMessage = '';
         $make = trim((string) ($decoded['make'] ?? ''));
         $model = trim((string) ($decoded['model'] ?? ''));
         $year = is_numeric($decoded['model_year'] ?? null) ? (int) $decoded['model_year'] : null;
@@ -331,13 +369,173 @@ class HomePartFinder extends Component
                 try {
                     $categoryLookup = $catalog->listCategoriesByVehicleDescriptor($make, $model, $year);
                     $this->vinCategories = is_array($categoryLookup['categories'] ?? null) ? $categoryLookup['categories'] : [];
+                    $tok = $categoryLookup['category_rows_cache_token'] ?? null;
+                    $this->vinCategoryRowsCacheToken = is_string($tok) && $tok !== '' ? $tok : null;
+                    // Сотни строк категорий в payload Livewire ломают/замедляют каждый клик по дереву — дерево берём из кэша API.
+                    if ($this->vinCategoryRowsCacheToken !== null) {
+                        $this->vinCategories = [];
+                    }
                     $this->vinCategoriesMessage = (string) ($categoryLookup['message'] ?? '');
+                    $tid = $categoryLookup['type_id'] ?? null;
+                    $this->vinCatalogVehicleId = is_numeric($tid) ? (int) $tid : null;
+                    $mid = $categoryLookup['manufacturer_id'] ?? null;
+                    $this->vinCatalogManufacturerId = is_numeric($mid) ? (int) $mid : null;
+                    $this->refreshVinCategoryCurrentLevel();
                 } catch (\Throwable $e) {
                     $this->vinCategoriesMessage = 'Не удалось получить категории из каталога API: '.$e->getMessage();
+                    $this->vinCatalogVehicleId = null;
+                    $this->vinCatalogManufacturerId = null;
+                    $this->vinCategoryRowsCacheToken = null;
+                    $this->vinCategoryCurrentNodes = [];
+                    $this->vinCategoryPath = [];
+                    $this->vinCategoryNavMessage = '';
                 }
             } else {
                 $this->vinCategoriesMessage = 'RapidAPI каталог не настроен (RAPIDAPI_AUTO_PARTS_KEY).';
             }
+        }
+    }
+
+    public function vinCategoryNavigateRoot(): void
+    {
+        if ($this->vinCategoryPath === []) {
+            return;
+        }
+        $this->vinCategoryPath = [];
+        $this->vinSelectedCatalogCategoryId = null;
+        $this->vinCatalogArticles = [];
+        $this->vinCatalogArticlesMessage = '';
+        $this->refreshVinCategoryCurrentLevel();
+    }
+
+    public function vinCategoryNavigateUp(): void
+    {
+        if ($this->vinCategoryPath === []) {
+            return;
+        }
+        array_pop($this->vinCategoryPath);
+        $this->vinSelectedCatalogCategoryId = null;
+        $this->vinCatalogArticles = [];
+        $this->vinCatalogArticlesMessage = '';
+        $this->refreshVinCategoryCurrentLevel();
+    }
+
+    public function enterVinCategoryBranch(int $nodeId): void
+    {
+        $nodeId = max(0, $nodeId);
+        if ($nodeId <= 0) {
+            return;
+        }
+
+        $level = $this->vinCategoryCurrentNodes;
+        foreach ($level as $node) {
+            if (! is_array($node) || (int) ($node['id'] ?? 0) !== $nodeId) {
+                continue;
+            }
+            $hasChildren = (bool) ($node['has_children'] ?? false);
+            if ($hasChildren) {
+                $name = trim((string) ($node['name'] ?? ''));
+                $this->vinCategoryPath[] = [
+                    'id' => $nodeId,
+                    'name' => $name !== '' ? $name : 'Раздел',
+                ];
+                $this->vinSelectedCatalogCategoryId = null;
+                $this->vinCatalogArticles = [];
+                $this->vinCatalogArticlesMessage = '';
+                $this->refreshVinCategoryCurrentLevel();
+
+                return;
+            }
+
+            $pathIds = $this->vinCategoryPathSegmentIds();
+            $pathIds[] = $nodeId;
+            $vid = (int) ($this->vinCatalogVehicleId ?? 0);
+            $mfr = (int) ($this->vinCatalogManufacturerId ?? 0);
+            $token = $this->vinCategoryRowsCacheToken;
+            if ($token !== null && $token !== '' && $vid > 0) {
+                /** @var AutoPartsCatalogService $catalog */
+                $catalog = app(AutoPartsCatalogService::class);
+                $aid = $catalog->resolveVinProductGroupLeafArticleId($token, $vid, $mfr, $pathIds);
+                $this->selectVinCatalogCategory($aid ?? $nodeId);
+            } else {
+                $this->selectVinCatalogCategory($nodeId);
+            }
+
+            return;
+        }
+    }
+
+    /**
+     * @return list<int>
+     */
+    protected function vinCategoryPathSegmentIds(): array
+    {
+        $ids = [];
+        foreach ($this->vinCategoryPath as $c) {
+            $i = (int) ($c['id'] ?? 0);
+            if ($i > 0) {
+                $ids[] = $i;
+            }
+        }
+
+        return $ids;
+    }
+
+    protected function refreshVinCategoryCurrentLevel(): void
+    {
+        $this->vinCategoryCurrentNodes = [];
+        $this->vinCategoryNavMessage = '';
+        $token = $this->vinCategoryRowsCacheToken;
+        if ($token === null || $token === '') {
+            return;
+        }
+        $vid = (int) ($this->vinCatalogVehicleId ?? 0);
+        $mfr = (int) ($this->vinCatalogManufacturerId ?? 0);
+        if ($vid <= 0) {
+            return;
+        }
+        /** @var AutoPartsCatalogService $catalog */
+        $catalog = app(AutoPartsCatalogService::class);
+        $res = $catalog->listVinProductGroupChildren($token, $vid, $mfr, $this->vinCategoryPathSegmentIds());
+        $this->vinCategoryCurrentNodes = is_array($res['nodes'] ?? null) ? $res['nodes'] : [];
+        $err = trim((string) ($res['error'] ?? ''));
+        if ($err !== '') {
+            $this->vinCategoryNavMessage = $err;
+        }
+    }
+
+    public function selectVinCatalogCategory(int $categoryId): void
+    {
+        $categoryId = max(0, $categoryId);
+        $this->vinSelectedCatalogCategoryId = $categoryId > 0 ? $categoryId : null;
+        $this->vinCatalogArticles = [];
+        $this->vinCatalogArticlesMessage = '';
+
+        $vid = $this->vinCatalogVehicleId;
+        if ($vid === null || $vid <= 0 || $categoryId <= 0) {
+            $this->vinCatalogArticlesMessage = 'Недостаточно данных для загрузки артикулов (нужны категории и id модификации в каталоге).';
+
+            return;
+        }
+
+        /** @var AutoPartsCatalogService $catalog */
+        $catalog = app(AutoPartsCatalogService::class);
+        if (! $catalog->isConfigured()) {
+            $this->vinCatalogArticlesMessage = 'RapidAPI каталог не настроен (RAPIDAPI_AUTO_PARTS_KEY).';
+
+            return;
+        }
+
+        try {
+            $mfr = (int) ($this->vinCatalogManufacturerId ?? 0);
+            $payload = $catalog->listArticlesByVehicleAndCategory($vid, $categoryId, $mfr);
+            $this->vinCatalogArticles = is_array($payload['articles'] ?? null) ? $payload['articles'] : [];
+            $this->vinCatalogArticlesMessage = (string) ($payload['message'] ?? '');
+            if (($payload['found'] ?? false) === false && trim($this->vinCatalogArticlesMessage) === '') {
+                $this->vinCatalogArticlesMessage = 'Артикулы не найдены.';
+            }
+        } catch (\Throwable $e) {
+            $this->vinCatalogArticlesMessage = 'Не удалось получить артикулы: '.$e->getMessage();
         }
     }
 
