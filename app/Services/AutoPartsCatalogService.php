@@ -1555,7 +1555,7 @@ class AutoPartsCatalogService
      *
      * @return array{
      *   found: bool,
-     *   articles: list<array{articleId: int|null, articleNo: string, name: string, supplierName: string, imageUrl: string|null, details: list<array{label: string, value: string}>}>,
+     *   articles: list<array{articleId: int|null, articleNo: string, name: string, supplierName: string, imageUrl: string|null, imageUrls: list<string>, details: list<array{label: string, value: string}>}>,
      *   message: string
      * }
      */
@@ -1641,7 +1641,7 @@ class AutoPartsCatalogService
 
     /**
      * @param  list<array<string,mixed>>  $rows
-     * @return list<array{articleId: int|null, articleNo: string, name: string, supplierName: string, imageUrl: string|null, details: list<array{label: string, value: string}>}>
+     * @return list<array{articleId: int|null, articleNo: string, name: string, supplierName: string, imageUrl: string|null, imageUrls: list<string>, details: list<array{label: string, value: string}>}>
      */
     protected function normalizeArticleListRows(array $rows, int $limit): array
     {
@@ -1735,6 +1735,7 @@ class AutoPartsCatalogService
                 'image',
                 'thumbnailurl',
                 'thumburl',
+                'articlemediafilename',
             ];
         }
 

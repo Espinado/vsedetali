@@ -1,4 +1,8 @@
-<div class="relative w-full">
+<div
+    class="relative w-full"
+    x-data="{ galleryOpen: false, gallerySrc: '', galleryAlt: '' }"
+    @keydown.escape.window="galleryOpen = false"
+>
     <div
         wire:loading.delay.shortest
         wire:target="decodeVin,clearSelection,vehicleMake,vehicleId,categoryId,productId"
@@ -212,13 +216,19 @@
                                         <article class="flex gap-3 rounded-xl border border-stone-200/90 bg-white p-3 text-xs text-stone-800 shadow-sm">
                                             @if($imgOk)
                                                 <div class="shrink-0">
-                                                    <img
-                                                        src="{{ $img }}"
-                                                        alt=""
-                                                        class="h-20 w-20 rounded-lg bg-stone-50 object-contain sm:h-24 sm:w-24"
-                                                        loading="lazy"
-                                                        decoding="async"
-                                                    />
+                                                    <button
+                                                        type="button"
+                                                        class="rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500/40"
+                                                        @click="gallerySrc = @js($img); galleryAlt = @js(trim((string) ($art['name'] ?? 'Деталь'))); galleryOpen = true"
+                                                    >
+                                                        <img
+                                                            src="{{ $img }}"
+                                                            alt="Фото: {{ trim((string) ($art['name'] ?? 'Деталь')) }}"
+                                                            class="h-20 w-20 rounded-lg bg-stone-50 object-contain sm:h-24 sm:w-24"
+                                                            loading="lazy"
+                                                            decoding="async"
+                                                        />
+                                                    </button>
                                                 </div>
                                             @endif
                                             <div class="min-w-0 flex-1 space-y-1">
@@ -393,4 +403,28 @@
             @endif
         </section>
     @endif
+
+    <div
+        x-show="galleryOpen"
+        x-cloak
+        class="fixed inset-0 z-[210] flex items-center justify-center bg-stone-900/80 p-4"
+        @click.self="galleryOpen = false"
+        role="dialog"
+        aria-modal="true"
+    >
+        <div class="relative w-full max-w-4xl rounded-2xl bg-white p-3 shadow-2xl sm:p-4">
+            <button
+                type="button"
+                class="absolute right-2 top-2 rounded-full bg-white/90 px-2.5 py-1 text-xs font-semibold text-stone-700 shadow hover:bg-white"
+                @click="galleryOpen = false"
+            >
+                Закрыть
+            </button>
+            <img
+                :src="gallerySrc"
+                :alt="galleryAlt"
+                class="max-h-[82vh] w-full rounded-xl bg-stone-100 object-contain"
+            >
+        </div>
+    </div>
 </div>
