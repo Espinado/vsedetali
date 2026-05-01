@@ -1170,7 +1170,23 @@ class AutoPartsCatalogService
 
         $manufacturerRows = $this->fetchManufacturerRows($langId, $typeId);
         if ($manufacturerRows === []) {
-            $empty['message'] = 'Каталог API не вернул список производителей. Проверьте RAPIDAPI_AUTO_PARTS_KEY (без пробелов и кавычек), что RAPIDAPI_AUTO_PARTS_HOST и RAPIDAPI_AUTO_PARTS_BASE_URL совпадают с приложением «Auto Parts Catalog» в RapidAPI, выполните php artisan config:clear на сервере. Подписка при этом может быть активной — частая причина несовпадение Host с выбранным API.';
+            $probe = $this->probeCatalogManufacturersListRequest($langId, $typeId, $countryId);
+            Log::warning('auto_parts_catalog_manufacturers_empty', [
+                'host' => trim((string) config('services.auto_parts_catalog.host')),
+                'base_url' => trim((string) config('services.auto_parts_catalog.base_url')),
+                'lang_id' => $langId,
+                'country_filter_id' => $countryId,
+                'vehicle_type_id' => $typeId,
+                'probe_path' => $probe['path'],
+                'probe_status' => $probe['status'],
+                'probe_rows' => $probe['parsed_rows'],
+                'probe_json_keys' => $probe['json_top_keys'],
+                'probe_body_snippet' => $probe['body_snippet'],
+                'probe_transport' => $probe['transport_error'],
+            ]);
+            $hint = $this->formatManufacturersEmptyHint($probe);
+            $empty['message'] = 'Каталог API не вернул список производителей. Проверьте RAPIDAPI_AUTO_PARTS_KEY, RAPIDAPI_AUTO_PARTS_HOST и RAPIDAPI_AUTO_PARTS_BASE_URL (карточка «Auto Parts Catalog» в RapidAPI), выполните php artisan config:clear; при php artisan config:cache — пересоберите кэш после правок .env.'
+                .($hint !== '' ? ' '.$hint : '');
 
             return $empty;
         }
@@ -1897,6 +1913,94 @@ class AutoPartsCatalogService
         ));
     }
 
+    /**
+     * Один запрос к основному маршруту производителей — для лога и короткой подсказки пользователю при пустом списке.
+     *
+     * @return array{
+     *   path: string,
+     *   status: int|null,
+     *   parsed_rows: int,
+     *   json_top_keys: list<string>,
+     *   body_snippet: string,
+     *   transport_error: string
+     * }
+     */
+    protected function probeCatalogManufacturersListRequest(int $langId, int $vehicleTypeId, int $countryId): array
+    {
+        $path = "/manufacturers/list/lang-id/{$langId}/country-filter-id/{$countryId}/type-id/{$vehicleTypeId}";
+        $out = [
+            'path' => $path,
+            'status' => null,
+            'parsed_rows' => 0,
+            'json_top_keys' => [],
+            'body_snippet' => '',
+            'transport_error' => '',
+        ];
+        $response = $this->catalogHttpGet($path);
+        if ($response === null) {
+            $out['transport_error'] = 'no_response';
+
+            return $out;
+        }
+        $out['status'] = $response->status();
+        $rawBody = (string) $response->body();
+        $out['body_snippet'] = Str::limit(preg_replace('/\s+/u', ' ', strip_tags($rawBody)), 220, '…');
+        if ($response->successful()) {
+            $json = $response->json();
+            if (is_array($json)) {
+                $out['json_top_keys'] = array_slice(array_keys($json), 0, 25);
+                $rows = $this->extractListRows($json);
+                if ($rows === []) {
+                    $rows = $this->extractNestedListRowsFromJson($json);
+                }
+                $out['parsed_rows'] = count($rows);
+            }
+        }
+
+        return $out;
+    }
+
+    /**
+     * @param  array{
+     *   path: string,
+     *   status: int|null,
+     *   parsed_rows: int,
+     *   json_top_keys: list<string>,
+     *   body_snippet: string,
+     *   transport_error: string
+     * }  $probe
+     */
+    protected function formatManufacturersEmptyHint(array $probe): string
+    {
+        if ($probe['transport_error'] !== '') {
+            return 'Диагностика: запрос к каталогу не выполнен (сеть/TLS/таймаут). Смотрите storage/logs/laravel.log (auto_parts_catalog_http_get).';
+        }
+        $st = $probe['status'];
+        if ($st === 401 || $st === 403) {
+            return 'Диагностика: HTTP '.$st.' — RapidAPI отклонил ключ или не совпадает X-RapidAPI-Host с приложением «Auto Parts Catalog».';
+        }
+        if ($st === 404) {
+            return 'Диагностика: HTTP 404 — проверьте RAPIDAPI_AUTO_PARTS_BASE_URL (базовый URL в кабинете RapidAPI).';
+        }
+        if ($st === 429) {
+            return 'Диагностика: HTTP 429 — превышен лимит запросов RapidAPI.';
+        }
+        if ($st !== null && $st >= 500) {
+            return 'Диагностика: HTTP '.$st.' — ошибка на стороне API каталога.';
+        }
+        if ($st === 200 && ($probe['parsed_rows'] ?? 0) === 0) {
+            $keys = $probe['json_top_keys'] ?? [];
+            $keysStr = $keys !== [] ? implode(', ', $keys) : '—';
+
+            return 'Диагностика: HTTP 200, но список не извлечён (ключи JSON: '.$keysStr.'). Включите RAPIDAPI_AUTO_PARTS_LOG_CATEGORY_ON_EMPTY=true для подробного лога.';
+        }
+        if ($st !== null && $st !== 200) {
+            return 'Диагностика: HTTP '.$st.'.';
+        }
+
+        return '';
+    }
+
     /** @return list<array<string,mixed>> */
     protected function fetchManufacturerRows(int $langId, int $vehicleTypeId): array
     {
@@ -2147,7 +2251,7 @@ class AutoPartsCatalogService
             return array_values(array_filter($raw, static fn ($r): bool => is_array($r)));
         }
 
-        foreach (['data', 'results', 'items', 'rows', 'list', 'array', 'values', 'content', 'models', 'manufacturers', 'types', 'categories', 'productGroups', 'assemblyGroups', 'vehicles', 'vehicleTypes', 'vehicleList', 'carTypes'] as $key) {
+        foreach (['data', 'results', 'items', 'rows', 'list', 'array', 'values', 'content', 'models', 'manufacturers', 'allManufacturers', 'manufacturerList', 'types', 'categories', 'productGroups', 'assemblyGroups', 'vehicles', 'vehicleTypes', 'vehicleList', 'carTypes', 'result'] as $key) {
             $inner = $raw[$key] ?? null;
             if (! is_array($inner)) {
                 continue;
