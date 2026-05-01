@@ -351,7 +351,9 @@ class HomePartFinder extends Component
         $decoded = $this->localizeVinResult($decoded);
 
         $this->vinDecodeResult = $decoded;
-        $this->vinDecodeMessage = (string) ($decoded['message'] ?? '');
+        $this->vinDecodeMessage = ($decoded['success'] ?? false)
+            ? (string) ($decoded['message'] ?? '')
+            : $this->storefrontServiceUnavailableMessage();
 
         $this->vinCategories = [];
         $this->vinCategoryRowsCacheToken = null;
@@ -375,14 +377,16 @@ class HomePartFinder extends Component
                     if ($this->vinCategoryRowsCacheToken !== null) {
                         $this->vinCategories = [];
                     }
-                    $this->vinCategoriesMessage = (string) ($categoryLookup['message'] ?? '');
+                    $this->vinCategoriesMessage = ($categoryLookup['found'] ?? false) === true
+                        ? ''
+                        : $this->storefrontServiceUnavailableMessage();
                     $tid = $categoryLookup['type_id'] ?? null;
                     $this->vinCatalogVehicleId = is_numeric($tid) ? (int) $tid : null;
                     $mid = $categoryLookup['manufacturer_id'] ?? null;
                     $this->vinCatalogManufacturerId = is_numeric($mid) ? (int) $mid : null;
                     $this->refreshVinCategoryCurrentLevel();
                 } catch (\Throwable $e) {
-                    $this->vinCategoriesMessage = 'Не удалось получить категории из каталога API: '.$e->getMessage();
+                    $this->vinCategoriesMessage = $this->storefrontServiceUnavailableMessage();
                     $this->vinCatalogVehicleId = null;
                     $this->vinCatalogManufacturerId = null;
                     $this->vinCategoryRowsCacheToken = null;
@@ -391,7 +395,7 @@ class HomePartFinder extends Component
                     $this->vinCategoryNavMessage = '';
                 }
             } else {
-                $this->vinCategoriesMessage = 'RapidAPI каталог не настроен (RAPIDAPI_AUTO_PARTS_KEY).';
+                $this->vinCategoriesMessage = $this->storefrontServiceUnavailableMessage();
             }
         }
     }
@@ -500,7 +504,7 @@ class HomePartFinder extends Component
         $this->vinCategoryCurrentNodes = is_array($res['nodes'] ?? null) ? $res['nodes'] : [];
         $err = trim((string) ($res['error'] ?? ''));
         if ($err !== '') {
-            $this->vinCategoryNavMessage = $err;
+            $this->vinCategoryNavMessage = $this->storefrontServiceUnavailableMessage();
         }
     }
 
@@ -513,7 +517,7 @@ class HomePartFinder extends Component
 
         $vid = $this->vinCatalogVehicleId;
         if ($vid === null || $vid <= 0 || $categoryId <= 0) {
-            $this->vinCatalogArticlesMessage = 'Недостаточно данных для загрузки артикулов (нужны категории и id модификации в каталоге).';
+            $this->vinCatalogArticlesMessage = $this->storefrontServiceUnavailableMessage();
 
             return;
         }
@@ -521,7 +525,7 @@ class HomePartFinder extends Component
         /** @var AutoPartsCatalogService $catalog */
         $catalog = app(AutoPartsCatalogService::class);
         if (! $catalog->isConfigured()) {
-            $this->vinCatalogArticlesMessage = 'RapidAPI каталог не настроен (RAPIDAPI_AUTO_PARTS_KEY).';
+            $this->vinCatalogArticlesMessage = $this->storefrontServiceUnavailableMessage();
 
             return;
         }
@@ -530,13 +534,19 @@ class HomePartFinder extends Component
             $mfr = (int) ($this->vinCatalogManufacturerId ?? 0);
             $payload = $catalog->listArticlesByVehicleAndCategory($vid, $categoryId, $mfr);
             $this->vinCatalogArticles = is_array($payload['articles'] ?? null) ? $payload['articles'] : [];
-            $this->vinCatalogArticlesMessage = (string) ($payload['message'] ?? '');
-            if (($payload['found'] ?? false) === false && trim($this->vinCatalogArticlesMessage) === '') {
-                $this->vinCatalogArticlesMessage = 'Артикулы не найдены.';
+            if (($payload['found'] ?? false) === true && $this->vinCatalogArticles !== []) {
+                $this->vinCatalogArticlesMessage = '';
+            } else {
+                $this->vinCatalogArticlesMessage = $this->storefrontServiceUnavailableMessage();
             }
         } catch (\Throwable $e) {
-            $this->vinCatalogArticlesMessage = 'Не удалось получить артикулы: '.$e->getMessage();
+            $this->vinCatalogArticlesMessage = $this->storefrontServiceUnavailableMessage();
         }
+    }
+
+    protected function storefrontServiceUnavailableMessage(): string
+    {
+        return 'Сервис недоступен.';
     }
 
     /**

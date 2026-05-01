@@ -23,7 +23,47 @@ class AutoPartsCatalogService
 {
     public function isConfigured(): bool
     {
+        if ($this->catalogUsesOutboundProxy()) {
+            return true;
+        }
+
         return trim((string) config('services.auto_parts_catalog.key')) !== '';
+    }
+
+    protected function catalogUsesOutboundProxy(): bool
+    {
+        $u = trim((string) config('services.auto_parts_catalog.proxy_url', ''));
+        $t = trim((string) config('services.auto_parts_catalog.proxy_token', ''));
+
+        return $u !== '' && $t !== '';
+    }
+
+    protected function catalogOutboundBaseUrl(): string
+    {
+        if ($this->catalogUsesOutboundProxy()) {
+            return rtrim(trim((string) config('services.auto_parts_catalog.proxy_url')), '/');
+        }
+
+        return rtrim(trim((string) config('services.auto_parts_catalog.base_url')), '/');
+    }
+
+    /**
+     * @return array<string, string>
+     */
+    protected function catalogOutboundHeaders(): array
+    {
+        if ($this->catalogUsesOutboundProxy()) {
+            return [
+                'Accept' => 'application/json',
+                'X-Catalog-Proxy-Token' => trim((string) config('services.auto_parts_catalog.proxy_token')),
+            ];
+        }
+
+        return [
+            'Accept' => 'application/json',
+            'X-RapidAPI-Key' => trim((string) config('services.auto_parts_catalog.key')),
+            'X-RapidAPI-Host' => trim((string) config('services.auto_parts_catalog.host')),
+        ];
     }
 
     /**
@@ -407,16 +447,12 @@ class AutoPartsCatalogService
         }
 
         if (! $this->isConfigured()) {
-            throw new \RuntimeException('Задайте RAPIDAPI_AUTO_PARTS_KEY в .env (RapidAPI → Auto Parts Catalog → ключ).');
+            throw new \RuntimeException('Задайте RAPIDAPI_AUTO_PARTS_KEY или пару RAPIDAPI_AUTO_PARTS_PROXY_URL + RAPIDAPI_AUTO_PARTS_PROXY_TOKEN (см. .env.example).');
         }
 
-        $base = rtrim((string) config('services.auto_parts_catalog.base_url'), '/');
+        $base = $this->catalogOutboundBaseUrl();
         $timeout = (int) config('services.auto_parts_catalog.timeout', 30);
-        $headers = [
-            'Accept' => 'application/json',
-            'X-RapidAPI-Key' => trim((string) config('services.auto_parts_catalog.key')),
-            'X-RapidAPI-Host' => trim((string) config('services.auto_parts_catalog.host')),
-        ];
+        $headers = $this->catalogOutboundHeaders();
 
         $tls = $this->httpTlsOptionsForCatalog();
 
@@ -1174,6 +1210,8 @@ class AutoPartsCatalogService
             Log::warning('auto_parts_catalog_manufacturers_empty', [
                 'host' => trim((string) config('services.auto_parts_catalog.host')),
                 'base_url' => trim((string) config('services.auto_parts_catalog.base_url')),
+                'outbound_base_url' => $this->catalogOutboundBaseUrl(),
+                'uses_outbound_proxy' => $this->catalogUsesOutboundProxy(),
                 'lang_id' => $langId,
                 'country_filter_id' => $countryId,
                 'vehicle_type_id' => $typeId,
@@ -1185,7 +1223,7 @@ class AutoPartsCatalogService
                 'probe_transport' => $probe['transport_error'],
             ]);
             $hint = $this->formatManufacturersEmptyHint($probe);
-            $empty['message'] = 'Каталог API не вернул список производителей. Проверьте RAPIDAPI_AUTO_PARTS_KEY, RAPIDAPI_AUTO_PARTS_HOST и RAPIDAPI_AUTO_PARTS_BASE_URL (карточка «Auto Parts Catalog» в RapidAPI), выполните php artisan config:clear; при php artisan config:cache — пересоберите кэш после правок .env.'
+            $empty['message'] = 'Каталог API не вернул список производителей. Проверьте ключ/host RapidAPI или настройте прокси (RAPIDAPI_AUTO_PARTS_PROXY_URL + RAPIDAPI_AUTO_PARTS_PROXY_TOKEN при HTTP 451 из-за региона сервера), выполните php artisan config:clear; при config:cache — пересоберите кэш.'
                 .($hint !== '' ? ' '.$hint : '');
 
             return $empty;
@@ -1984,6 +2022,9 @@ class AutoPartsCatalogService
         }
         if ($st === 429) {
             return 'Диагностика: HTTP 429 — превышен лимит запросов RapidAPI.';
+        }
+        if ($st === 451) {
+            return 'Диагностика: HTTP 451 — RapidAPI недоступен из региона исходящего IP. Используйте RAPIDAPI_AUTO_PARTS_PROXY_URL + RAPIDAPI_AUTO_PARTS_PROXY_TOKEN (HTTPS-прокси в разрешённой стране, см. .env.example).';
         }
         if ($st !== null && $st >= 500) {
             return 'Диагностика: HTTP '.$st.' — ошибка на стороне API каталога.';
@@ -2813,19 +2854,16 @@ class AutoPartsCatalogService
     protected function getJson(string $pathOrQuery): ?array
     {
         if (! $this->isConfigured()) {
-            throw new \RuntimeException('Задайте RAPIDAPI_AUTO_PARTS_KEY в .env (RapidAPI → Auto Parts Catalog → ключ).');
+            throw new \RuntimeException('Задайте RAPIDAPI_AUTO_PARTS_KEY или пару RAPIDAPI_AUTO_PARTS_PROXY_URL + RAPIDAPI_AUTO_PARTS_PROXY_TOKEN (см. .env.example).');
         }
 
-        $base = rtrim((string) config('services.auto_parts_catalog.base_url'), '/');
+        $base = $this->catalogOutboundBaseUrl();
         $url = str_starts_with($pathOrQuery, 'http') ? $pathOrQuery : $base.$pathOrQuery;
         $timeout = (int) config('services.auto_parts_catalog.timeout', 30);
 
         $req = Http::acceptJson()
             ->timeout($timeout)
-            ->withHeaders([
-                'X-RapidAPI-Key' => trim((string) config('services.auto_parts_catalog.key')),
-                'X-RapidAPI-Host' => trim((string) config('services.auto_parts_catalog.host')),
-            ]);
+            ->withHeaders($this->catalogOutboundHeaders());
         $tls = $this->httpTlsOptionsForCatalog();
         if ($tls !== []) {
             $req = $req->withOptions($tls);
@@ -2850,17 +2888,14 @@ class AutoPartsCatalogService
             return null;
         }
 
-        $base = rtrim((string) config('services.auto_parts_catalog.base_url'), '/');
+        $base = $this->catalogOutboundBaseUrl();
         $url = str_starts_with($pathOrQuery, 'http') ? $pathOrQuery : $base.$pathOrQuery;
         $timeout = (int) config('services.auto_parts_catalog.timeout', 30);
 
         try {
             $req = Http::acceptJson()
                 ->timeout($timeout)
-                ->withHeaders([
-                    'X-RapidAPI-Key' => trim((string) config('services.auto_parts_catalog.key')),
-                    'X-RapidAPI-Host' => trim((string) config('services.auto_parts_catalog.host')),
-                ]);
+                ->withHeaders($this->catalogOutboundHeaders());
             $tls = $this->httpTlsOptionsForCatalog();
             if ($tls !== []) {
                 $req = $req->withOptions($tls);

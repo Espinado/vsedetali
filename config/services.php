@@ -54,6 +54,12 @@ return [
         'vin_flow_article_list_limit' => max(1, min(100, (int) env('RAPIDAPI_AUTO_PARTS_VIN_ARTICLE_LIMIT', 48))),
         'timeout' => (int) env('RAPIDAPI_AUTO_PARTS_TIMEOUT', 30),
         /**
+         * Опционально: HTTPS-прокси в разрешённом для RapidAPI регионе (тело запросов как к Auto Parts Catalog).
+         * На основном .env достаточно URL + токена; ключ RapidAPI хранится только на машине прокси.
+         */
+        'proxy_url' => trim((string) env('RAPIDAPI_AUTO_PARTS_PROXY_URL', '')),
+        'proxy_token' => trim((string) env('RAPIDAPI_AUTO_PARTS_PROXY_TOKEN', '')),
+        /**
          * Доп. GET-пути к карточке артикула (через «|»), плейсхолдеры {articleId} и {langId}.
          * См. плейграунд RapidAPI — если «богатый» JSON с articleInfo/compatibleCars на другом маршруте.
          */
